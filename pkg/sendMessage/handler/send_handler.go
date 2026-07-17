@@ -545,10 +545,9 @@ func (s *sendHandler) SendButton(ctx *gin.Context) {
 		return
 	}
 
-	if data.Footer == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "footer is required"})
-		return
-	}
+	// FIX (2026-07-15): footer agora é OPCIONAL. Payloads reais de botões que
+	// renderizam (capturados via BTN-DEBUG) não carregam footer; exigi-lo impedia
+	// reproduzir o molde exato.
 
 	message, err := s.sendMessageService.SendButton(data, instance)
 	if err != nil {

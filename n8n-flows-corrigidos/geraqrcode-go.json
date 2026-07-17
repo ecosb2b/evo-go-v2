@@ -1,0 +1,915 @@
+{
+  "name": "GeraQRCode-GO",
+  "nodes": [
+    {
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1450,
+        -620
+      ],
+      "typeVersion": 1,
+      "id": "sticky-overview-go",
+      "name": "Sticky Note - Visão Geral",
+      "parameters": {
+        "content": "GERADOR DE QR CODE - EVO GO (equivalente ao GeraQRCode.json da Evolution API antiga)\n\nBaseado 100% no código-fonte real clonado em D:\\Desenvolvimento\\EgoGO_Git (nao no swagger genérico):\n\n1) POST /instance/create e POST /instance/proxy/{instanceId} exigem apikey = GLOBAL_API_KEY (AuthAdmin).\n2) GET /instance/qr e GET /instance/status exigem apikey = TOKEN DA PRÓPRIA INSTÂNCIA (Auth), resolvido via\n   GetInstanceByToken - não aceitam a global key.\n3) Para não depender de um banco/lookup externo, o token de cada instância é DERIVADO deterministicamente\n   via HMAC-SHA256(ATHENE_SECRET_KEY, instanceName) no node 'Gerar Token (Go)'. O mesmo cálculo é repetido\n   sempre que precisamos do apikey daquela instância - não precisa persistir nada.\n4) CreateStruct aceita um campo opcional 'instanceId' - usamos o próprio nome sanitizado da instância como\n   id, então nunca precisamos ler o UUID de volta da resposta do /instance/create.\n5) Antes do PRIMEIRO /instance/qr (ou seja, só na criação), aplicamos o mesmo fix de consistência de proxy\n   já feito no GeraQRCode antigo e no Monitoramento: busca no Hub (/api/proxy-ideal, HMAC-assinado) +\n   POST /instance/proxy/{instanceId} (host/port/protocol, sem 'enabled' - schema real do Go é outro).\n6) O HTML/JS da página é o MESMO da versão antiga (nenhuma mudança de front-end) - só o back-end n8n muda.\n\nEnv vars necessárias no n8n: ATHENE_SECRET_KEY, ATHENE_GATEWAY_IP (já usadas nos outros fluxos Go entregues).",
+        "height": 640,
+        "width": 900,
+        "color": 4
+      }
+    },
+    {
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1450,
+        40
+      ],
+      "typeVersion": 1,
+      "id": "sticky-fluxo-go",
+      "name": "Sticky Note - Fluxo de Pareamento",
+      "parameters": {
+        "content": "Fluxo de pareamento (a cada chamada de 'Atualiza qr code (Go)'):\n\n1. Sanitiza o nome da instância vindo do body\n2. Deriva o token da instância (HMAC determinístico)\n3. Consulta GET /instance/all (admin) para saber se a instância já existe, se já está\n   conectada, e se JÁ TEM um proxy configurado (campo 'proxy' do Instance model)\n4a. Já conectada -> responde JSON 'connected' (mesmo shape do fluxo antigo)\n4b. Não existe ainda -> POST /instance/create -> seta proxy via Hub -> segue pro passo 5\n4c. Já existe, não conectada, MAS sem proxy -> pula criação, roda só o proxy via Hub -> passo 5\n    (cobre instâncias criadas por outro fluxo/manualmente, sem o fix de proxy aplicado ainda)\n4d. Já existe, não conectada, e já tem proxy -> pula os dois, vai direto pro passo 5\n5. GET /instance/qr (apikey = token da instância) - idempotente, seguro de chamar em todo poll\n6. Se veio qrcode -> responde binário (imagem) pro front-end\n   Se veio passkey (ceremonia sem QR) -> responde JSON 'passkey_required'\n   Se nenhum dos dois -> responde JSON 'pending' (front-end tenta de novo em 1.5s)",
+        "height": 420,
+        "width": 560,
+        "color": 5
+      },
+      "height": 480
+    },
+    {
+      "parameters": {
+        "path": "ninelabs-go/:instanceName",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1400,
+        -350
+      ],
+      "id": "wh-pagina-fixa-go",
+      "name": "Inicializa a pagina Com Instance Fixa (Go)",
+      "webhookId": "a1b1c1d1-0001-4go1-9go1-webhookpagfg1"
+    },
+    {
+      "parameters": {
+        "path": "ninelabs-go",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1400,
+        -200
+      ],
+      "id": "wh-pagina-go",
+      "name": "Inicializa a pagina (Go)",
+      "webhookId": "a1b1c1d1-0002-4go1-9go1-webhookpagfg2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ajuda-go",
+              "name": "ajuda",
+              "value": "https://za9.com.br",
+              "type": "string"
+            },
+            {
+              "id": "endpoint-go",
+              "name": "endpoint",
+              "value": "https://n8n.athenesistemas.com.br/webhook/atualizar-qr-code-go",
+              "type": "string"
+            },
+            {
+              "id": "instancename-go",
+              "name": "instanceName",
+              "value": "={{ $json.params.instanceName || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1150,
+        -275
+      ],
+      "id": "set-campos-dinamicos-go",
+      "name": "Campos Dinâmicos (Go)"
+    },
+    {
+      "parameters": {
+        "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <title>Gerador de QR Code WhatsApp</title>\n  <script src=\"https://cdn.tailwindcss.com\"></script>\n  <style>\n    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');\n    \n    * {\n      font-family: 'Inter', system-ui, sans-serif;\n    }\n    \n    .fade-in {\n      animation: fadeIn 0.4s ease-out;\n    }\n    \n    @keyframes fadeIn {\n      from { opacity: 0; transform: translateY(16px); }\n      to { opacity: 1; transform: translateY(0); }\n    }\n    \n    .spinner {\n      width: 20px;\n      height: 20px;\n      border: 2px solid #e5e7eb;\n      border-radius: 50%;\n      border-top-color: #3b82f6;\n      animation: spin 1s linear infinite;\n    }\n    \n    @keyframes spin {\n      to { transform: rotate(360deg); }\n    }\n    \n    .progress-circle {\n      transform: rotate(-90deg);\n    }\n    \n    .progress-path {\n      stroke-dasharray: 157;\n      stroke-dashoffset: 157;\n      transition: stroke-dashoffset 1s linear;\n    }\n    \n    .feature-card {\n      transition: all 0.2s ease;\n    }\n    \n    .feature-card:hover {\n      transform: translateY(-2px);\n    }\n    \n    .input-focus {\n      transition: all 0.2s ease;\n    }\n    \n    .input-focus:focus {\n      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);\n    }\n    \n    .btn-primary {\n      transition: all 0.2s ease;\n    }\n    \n    .btn-primary:hover:not(:disabled) {\n      transform: translateY(-1px);\n      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);\n    }\n    \n    .btn-secondary {\n      transition: all 0.2s ease;\n    }\n    \n    .btn-secondary:hover {\n      background-color: #f9fafb;\n      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);\n    }\n  </style>\n</head>\n<body class=\"min-h-screen bg-gray-50\">\n  <!-- Main Content -->\n  <div class=\"min-h-screen flex items-center justify-center p-4\">\n    <div class=\"w-full max-w-md\">\n      <!-- Header -->\n      <div class=\"text-center mb-8 fade-in\">\n        <div class=\"inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-6 shadow-sm\">\n          <svg class=\"w-8 h-8 text-white\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z\"/>\n          </svg>\n        </div>\n        <h1 class=\"text-2xl font-semibold text-gray-900 mb-2\">Gerador de QR Code</h1>\n        <p class=\"text-gray-600\">Conecte sua instância WhatsApp rapidamente</p>\n      </div>\n\n      <!-- Main Card -->\n      <div class=\"bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden fade-in\">\n        <div class=\"p-6\">\n          <!-- Features Grid -->\n          <div class=\"grid grid-cols-3 gap-4 mb-8\">\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-blue-100 text-blue-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 10V3L4 14h7v7l9-11h-7z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Rápido</p>\n            </div>\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-green-100 text-green-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Seguro</p>\n            </div>\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-purple-100 text-purple-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Simples</p>\n            </div>\n          </div>\n\n          <!-- Input Section -->\n          <div class=\"space-y-6\">\n            <div>\n              <label for=\"instanceName\" class=\"block text-sm font-medium text-gray-900 mb-3\">\n                Nome da Instância\n              </label>\n              <div class=\"relative\">\n                <input\n                  id=\"instanceName\"\n                  type=\"text\"\n                  placeholder=\"Digite o nome da sua instância\"\n                  value=\"{{ $json.instanceName || '' }}\"\n                  class=\"input-focus w-full px-4 py-4 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-0 outline-none text-gray-900 placeholder-gray-500 bg-white {{ $json.instanceName ? 'bg-gray-100 cursor-not-allowed' : '' }}\"\n                  {{ $json.instanceName ? 'readonly' : '' }}\n                />\n                <div class=\"absolute inset-y-0 right-4 flex items-center text-gray-400\">\n                  <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                    <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z\"/>\n                  </svg>\n                </div>\n              </div>\n              <p class=\"text-sm text-gray-500 mt-2\">Escolha um nome único para identificar sua conexão</p>\n            </div>\n\n            <!-- Generate Button -->\n            <button\n              id=\"generateButton\"\n              onclick=\"generateQRCode()\"\n              class=\"btn-primary w-full py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none disabled:transform-none relative overflow-hidden\"\n            >\n              <div class=\"flex items-center justify-center space-x-2\">\n                <div id=\"buttonIcon\">\n                  <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                    <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5\"/>\n                  </svg>\n                </div>\n                <span id=\"buttonText\">Gerar QR Code</span>\n              </div>\n            </button>\n          </div>\n\n          <!-- Loading State -->\n          <div id=\"loader\" class=\"hidden text-center py-12\">\n            <div class=\"inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-xl mb-4\">\n              <div class=\"spinner\"></div>\n            </div>\n            <p class=\"text-gray-900 font-medium mb-1\">Gerando QR Code</p>\n            <p class=\"text-sm text-gray-500\">Aguarde um momento...</p>\n          </div>\n\n          <!-- QR Code Display -->\n          <div id=\"qrcode\" class=\"hidden text-center py-6\">\n            <div class=\"bg-gray-50 rounded-xl p-6 border border-gray-200\">\n              <div id=\"qrImage\" class=\"mb-6\"></div>\n              \n              <!-- Instructions -->\n              <div class=\"space-y-4\">\n                <h3 class=\"text-sm font-medium text-gray-900 mb-4\">Como conectar:</h3>\n                <div class=\"space-y-3 text-left max-w-xs mx-auto\">\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">1</div>\n                    <p class=\"text-sm text-gray-600\">Abra o WhatsApp no celular</p>\n                  </div>\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">2</div>\n                    <p class=\"text-sm text-gray-600\">Acesse \"Aparelhos conectados\"</p>\n                  </div>\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">3</div>\n                    <p class=\"text-sm text-gray-600\">Escaneie este código</p>\n                  </div>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          <!-- Timer -->\n          <div id=\"timer\" class=\"hidden\">\n            <div class=\"bg-amber-50 border border-amber-200 rounded-xl p-4 mt-6\">\n              <div class=\"flex items-center justify-center space-x-3\">\n                <div class=\"relative w-8 h-8\">\n                  <svg class=\"progress-circle w-8 h-8\" viewBox=\"0 0 50 50\">\n                    <circle\n                      class=\"progress-path\"\n                      stroke=\"#f59e0b\"\n                      stroke-width=\"2\"\n                      fill=\"transparent\"\n                      r=\"25\"\n                      cx=\"25\"\n                      cy=\"25\"\n                    />\n                  </svg>\n                  <div class=\"absolute inset-0 flex items-center justify-center\">\n                    <svg class=\"w-3 h-3 text-amber-600\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                      <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n                    </svg>\n                  </div>\n                </div>\n                <div class=\"text-center\">\n                  <p id=\"timerText\" class=\"text-sm font-medium text-amber-800\"></p>\n                  <p class=\"text-xs text-amber-600\">Tempo restante</p>\n                </div>\n              </div>\n            </div>\n          </div>\n        </div>\n      </div>\n\n      <!-- Help Button -->\n      <div class=\"mt-6 fade-in\">\n        <button\n          id=\"helpButton\"\n          onclick=\"window.open('{{ $json.ajuda }}', '_blank')\"\n          class=\"btn-secondary w-full py-4 px-6 bg-white text-gray-700 font-medium rounded-xl border border-gray-300 hover:bg-gray-50\"\n        >\n          <div class=\"flex items-center justify-center space-x-3\">\n            <svg class=\"w-5 h-5 text-gray-500\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n              <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n            </svg>\n            <span>Precisa de ajuda?</span>\n          </div>\n        </button>\n      </div>\n\n      <!-- Footer -->\n      <div class=\"text-center mt-8 fade-in\">\n        <div class=\"flex items-center justify-center space-x-2 text-sm text-gray-500\">\n          <svg class=\"w-4 h-4 text-green-500\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"/>\n          </svg>\n          <span>Conexão segura</span>\n          <span>•</span>\n          <span class=\"font-medium text-gray-600\">WhatsApp Business API</span>\n        </div>\n      </div>\n    </div>\n  </div>\n\n  <script>\n    let timerInterval;\n    let timeLeft = 30;\n\n    async function generateQRCode() {\n      const input = document.getElementById('instanceName');\n      const name = input.value.trim();\n      \n      if (!name) {\n        input.focus();\n        input.classList.add('border-red-400', 'ring-4', 'ring-red-100');\n        setTimeout(() => {\n          input.classList.remove('border-red-400', 'ring-4', 'ring-red-100');\n        }, 2500);\n        return;\n      }\n\n      await fetchQRCode(name);\n    }\n\n    async function fetchQRCode(name) {\n      const loader = document.getElementById('loader');\n      const button = document.getElementById('generateButton');\n      const buttonText = document.getElementById('buttonText');\n      const buttonIcon = document.getElementById('buttonIcon');\n      const qrSection = document.getElementById('qrcode');\n      const qrImageContainer = document.getElementById('qrImage');\n      const timerSection = document.getElementById('timer');\n\n      // Show loading state\n      qrSection.classList.add('hidden');\n      timerSection.classList.add('hidden');\n      loader.classList.remove('hidden');\n      button.disabled = true;\n      buttonText.textContent = 'Gerando...';\n      buttonIcon.innerHTML = '<div class=\"spinner\"></div>';\n\n      try {\n        const endpoint = '{{ $json.endpoint }}'; \n\n        const res = await fetch(endpoint, {\n          method: 'POST',\n          headers: { 'Content-Type': 'application/json' },\n          body: JSON.stringify({ instance: name })\n        });\n\n        if (!res.ok) {\n          let errorMsg = `Erro HTTP: ${res.status}`;\n          try {\n            const errorData = await res.json();\n            if (errorData && errorData.message) {\n              errorMsg = errorData.message;\n            }\n          } catch (e) {\n            errorMsg = res.statusText || errorMsg;\n          }\n          throw new Error(errorMsg);\n        }\n        \n        const blob = await res.blob();\n        if (blob.type.startsWith('image/')) {\n          const url = URL.createObjectURL(blob);\n          qrImageContainer.innerHTML = `<img src=\"${url}\" alt=\"QR Code WhatsApp\" class=\"rounded-xl max-w-64 mx-auto\" />`;\n        } else {\n          const ct = res.headers.get('content-type') || '';\n          const text = await blob.text();\n          try {\n            const payload = JSON.parse(text);\n            const state = (payload?.data?.instance?.state || payload?.status || '').toLowerCase();\n            if (['connected','ready','qrreadsuccess','authenticated','open'].includes(state)) {\n              showConnected(data?.message || 'Conectado com sucesso!');\n              return;\n            }\n          } catch (_) {\n            // não era JSON; segue para erro\n          }\n          if(!text){ showConnected('Já está conectado'); return;} throw new Error(text || 'Resposta inesperada do servidor.');\n        }\n\n\n        // Show QR code\n        loader.classList.add('hidden');\n        qrSection.classList.remove('hidden');\n        timerSection.classList.remove('hidden');\n        resetTimer();\n\n        // depois de mostrar o QR e chamar resetTimer();\n        pollUntilConnected(name);\n        \n        async function pollUntilConnected(name) {\n          if (timeLeft <= 0) return;\n        \n          const endpoint = '{{ $json.endpoint }}';\n          try {\n            const res = await fetch(endpoint, {\n              method: 'POST',\n              headers: { 'Content-Type': 'application/json' },\n              body: JSON.stringify({ instance: name })\n            });\n            const ct = res.headers.get('content-type') || '';\n            if (ct.includes('application/json')) {\n              const data = await res.json();\n              const state = (data?.data?.instance?.state || data?.status || '').toLowerCase();\n              if (['connected','ready','qrreadsuccess','authenticated','open'].includes(state)) {\n                showConnected(data?.message || 'Conectado com sucesso!');\n                return;\n              }\n            }\n          } catch (e) {\n            // silencioso; tentamos de novo\n          }\n          setTimeout(() => pollUntilConnected(name), 1500);\n        }\n\n        \n      } catch (error) {\n        console.error('Erro ao gerar QR Code:', error);\n        loader.classList.add('hidden');\n        qrSection.classList.add('hidden');\n        timerSection.classList.add('hidden');\n        showError(error.message || 'Erro ao gerar QR Code. Tente novamente.');\n      } finally {\n        button.disabled = false;\n        buttonText.textContent = 'Gerar QR Code';\n        buttonIcon.innerHTML = `\n          <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5\"/>\n          </svg>\n        `;\n      }\n    }\n\n    function resetTimer() {\n      clearInterval(timerInterval);\n      timeLeft = 30;\n      updateTimerDisplay();\n      timerInterval = setInterval(updateTimerDisplay, 1000);\n    }\n\n    function updateTimerDisplay() {\n      const timerTextEl = document.getElementById('timerText');\n      const progressPath = document.querySelector('.progress-path');\n      const timerSection = document.getElementById('timer');\n      const qrSection = document.getElementById('qrcode');\n      \n      if (timeLeft <= 0) {\n        clearInterval(timerInterval);\n        timerTextEl.textContent = 'Código expirado!';\n        progressPath.style.strokeDashoffset = 157;\n        setTimeout(() => {\n          timerSection.classList.add('hidden');\n          qrSection.classList.add('hidden');\n          showError('QR Code expirado. Gere um novo código.');\n        }, 1000);\n        return;\n      }\n      \n      timerTextEl.textContent = `${timeLeft}s`;\n      \n      const circumference = 2 * Math.PI * 25;\n      const offset = circumference - (timeLeft / 30) * circumference;\n      progressPath.style.strokeDashoffset = offset;\n      \n      timeLeft--;\n    }\n\n    function showConnected(message='Conectado com sucesso!') {\n      clearInterval(timerInterval);\n      const qrSectionElem = document.getElementById('qrcode');\n      const timerElem = document.getElementById('timer');\n      const loader = document.getElementById('loader');\n      const button = document.getElementById('generateButton');\n      const buttonText = document.getElementById('buttonText');\n      const buttonIcon = document.getElementById('buttonIcon');\n      \n      if (qrSectionElem) qrSectionElem.classList.add('hidden');\n      if (timerElem) timerElem.classList.add('hidden');\n      if (loader) loader.classList.add('hidden');\n\n      // reset primary button to idle state\n      if (button) button.disabled = false;\n      if (buttonText) buttonText.textContent = 'Gerar QR Code';\n      if (buttonIcon) buttonIcon.innerHTML = `\n          <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M4 4v4m0-4h4M4 20v-4m0 4h4M20 4v4m0-4h-4M20 20v-4m0 4h-4\"/>\n          </svg>`;\n\n      const card = document.querySelector('.bg-white.rounded-2xl');\n      const ok = document.createElement('div');\n      ok.className = 'mt-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 text-center';\n      ok.textContent = message || 'Conectado com sucesso!';\n      card.appendChild(ok);\n\n      // after a brief delay, scroll to top and auto-hide the toast\n      window.scrollTo({top:0, behavior:'smooth'});\n      setTimeout(()=> ok.remove(), 4000);\n    }\n    function showError(message) {\n      const errorDiv = document.createElement('div');\n      errorDiv.className = 'fixed top-6 right-6 bg-red-500 text-white px-6 py-4 rounded-xl shadow-lg z-50 text-sm font-medium max-w-sm';\n      errorDiv.textContent = message;\n      document.body.appendChild(errorDiv);\n      \n      setTimeout(() => {\n        errorDiv.style.animation = 'fadeIn 0.3s ease-out reverse';\n        setTimeout(() => errorDiv.remove(), 300);\n      }, 4000);\n    }\n\n    // Event listeners\n    document.getElementById('instanceName').addEventListener('keypress', function(e) {\n      if (e.key === 'Enter') {\n        e.preventDefault();\n        generateQRCode();\n      }\n    });\n\n    window.addEventListener('load', () => {\n      document.getElementById('instanceName').focus();\n    });\n  </script>\n</body>\n</html>"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -900,
+        -275
+      ],
+      "id": "html-pagina-qr-go",
+      "name": "Pagina QR Code (Go)"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -650,
+        -275
+      ],
+      "id": "resp-html-go",
+      "name": "Gera Html Dinâmico (Go)"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "atualizar-qr-code-go",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1400,
+        200
+      ],
+      "id": "wh-atualiza-qr-go",
+      "name": "Atualiza qr code (Go)",
+      "webhookId": "a1b1c1d1-0003-4go1-9go1-webhookatzgo"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sanitize-instance-go",
+              "name": "instanceName",
+              "value": "={{ (\n  $json.body?.instance ||\n  $json.query?.instance ||\n  ''\n).toString().trim().replaceAll(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g,'').replaceAll('\\n','').replaceAll('=','') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1150,
+        200
+      ],
+      "id": "set-sanitizar-instance-go",
+      "name": "Sanitizar Instance (Go)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst crypto = require('crypto');\nconst instanceName = $json.instanceName;\nif (!instanceName) throw new Error('instance (nome da instancia) e obrigatorio no body.');\n// Token determinístico: nao precisa persistir em banco, sempre recalculavel a partir do nome.\nconst token = crypto.createHmac('sha256', SECRET_KEY).update('evogo-instance-token:' + instanceName).digest('hex');\nreturn { json: { instanceName, instanceId: instanceName, token } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        200
+      ],
+      "id": "code-gerar-token-go",
+      "name": "Gerar Token (Go)"
+    },
+    {
+      "parameters": {
+        "url": "https://evogo.athenesistemas.com.br/instance/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -650,
+        200
+      ],
+      "id": "http-get-instances-qr-go",
+      "name": "Get Instances Go (QR)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Gerar Token (Go)').item.json;\nconst targetId = ctx.instanceId;\nconst targetName = ctx.instanceName;\nconst response = $json;\n\nlet list = response;\nif (!Array.isArray(list)) {\n  list = response.data || response.instances || response.result || Object.values(response)[0];\n}\n\nif (!Array.isArray(list)) {\n  return { json: { ...ctx, found: false, connected: false, has_proxy: false } };\n}\n\nconst found = list.find(inst => {\n  const id = inst.id || inst.Id || inst.ID;\n  const name = inst.name || inst.Name || inst.instanceName;\n  return id === targetId || name === targetName;\n});\n\nif (!found) {\n  return { json: { ...ctx, found: false, connected: false, has_proxy: false } };\n}\n\nconst connected = found.connected === true || found.connected === 'true' ||\n  String(found.state || found.status || '').toLowerCase() === 'open';\n\n// Instance.Proxy (json:\"proxy\") no model Go: string vazia quando nao ha proxy configurado.\n// Checamos os nomes de campo mais prováveis, ja que /instance/all devolve o Instance model cru.\nconst proxyRaw = found.proxy ?? found.Proxy ?? '';\nconst hasProxy = typeof proxyRaw === 'string' ? proxyRaw.trim() !== '' : !!proxyRaw;\n\nreturn { json: { ...ctx, found: true, connected, has_proxy: hasProxy } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        200
+      ],
+      "id": "code-resolver-instancia-qr-go",
+      "name": "Resolver Instância (Go QR)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ja-conectado-cond-go",
+              "leftValue": "={{ $json.connected }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -150,
+        200
+      ],
+      "id": "if-ja-conectado-go",
+      "name": "Já Conectado? (Go)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "status": "connected",
+          "message": "Já está conectado",
+          "data": {
+            "instance": {
+              "instanceName": "={{ $json.instanceName }}",
+              "state": "connected"
+            }
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        100,
+        40
+      ],
+      "id": "resp-ja-conectado-go",
+      "name": "Responder Conectado (Go)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "instancia-existe-cond-go",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        100,
+        300
+      ],
+      "id": "if-instancia-existe-go",
+      "name": "Instância Existe? (Go)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://evogo.athenesistemas.com.br/instance/create",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ instanceId: $json.instanceId, name: $json.instanceName, token: $json.token }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        400
+      ],
+      "id": "http-criar-instancia-go",
+      "name": "Criar Instância (Go)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst ctx = $('Gerar Token (Go)').item.json;\nconst dataObj = { limite_envios: 50, instance: ctx.instanceName };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { ...ctx, req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        400
+      ],
+      "id": "code-hmac-proxy-qr-go",
+      "name": "HMAC Proxy (Go QR)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        400
+      ],
+      "id": "http-hub-proxy-qr-go",
+      "name": "Hub Proxy (Go QR)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://evogo.athenesistemas.com.br/instance/proxy/' + $('Gerar Token (Go)').item.json.instanceId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $('Gerar Token (Go)').item.json.instanceName }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy (Go QR)').item.json.proxy?.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1350,
+        400
+      ],
+      "id": "http-set-proxy-qr-go",
+      "name": "Set Proxy (Go QR)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://evogo.athenesistemas.com.br/instance/qr",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Gerar Token (Go)').item.json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        300
+      ],
+      "id": "http-buscar-qr-go",
+      "name": "Buscar QR (Go)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Gerar Token (Go)').item.json;\nconst resp = $json;\n\n// resp esperado: {message:'success', data:{qrcode, code, passkeyStage, passkeyOpenUrl, passkeyCode}}\n// Em erro (ex: 'session already logged in'), resp.error existe e resp.data fica undefined.\nconst data = resp.data || {};\nconst rawQr = data.qrcode || '';\nconst base64 = rawQr.includes(',') ? rawQr.split(',').pop() : rawQr;\n\nconst hasQr = !!base64;\nconst hasPasskey = !hasQr && !!data.passkeyOpenUrl;\n\nreturn {\n  json: {\n    instanceName: ctx.instanceName,\n    instanceId: ctx.instanceId,\n    has_qr: hasQr,\n    base64,\n    has_passkey: hasPasskey,\n    passkeyOpenUrl: data.passkeyOpenUrl || '',\n    error_message: resp.error || ''\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1850,
+        300
+      ],
+      "id": "code-extrair-qr-go",
+      "name": "Extrair QR (Go)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tem-qr-cond-go",
+              "leftValue": "={{ $json.has_qr }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2100,
+        300
+      ],
+      "id": "if-tem-qr-go",
+      "name": "Tem QR? (Go)"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "base64",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2350,
+        150
+      ],
+      "id": "convert-binary-go",
+      "name": "Converte para Binário (Go)"
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2600,
+        150
+      ],
+      "id": "resp-qr-binario-go",
+      "name": "Responder QR Binário (Go)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e-passkey-cond-go",
+              "leftValue": "={{ $json.has_passkey }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2350,
+        400
+      ],
+      "id": "if-e-passkey-go",
+      "name": "É Passkey? (Go)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "status": "passkey_required",
+          "message": "Abra o WhatsApp para concluir a vinculação (passkey)",
+          "passkeyOpenUrl": "={{ $json.passkeyOpenUrl }}",
+          "data": {
+            "instance": {
+              "instanceName": "={{ $json.instanceName }}",
+              "state": "passkey"
+            }
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2600,
+        320
+      ],
+      "id": "resp-passkey-go",
+      "name": "Responder Passkey (Go)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "status": "pending",
+          "message": "={{ $json.error_message || 'Aguardando QR Code...' }}",
+          "data": {
+            "instance": {
+              "instanceName": "={{ $json.instanceName }}",
+              "state": "pending"
+            }
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2600,
+        480
+      ],
+      "id": "resp-aguardando-go",
+      "name": "Responder Aguardando (Go)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "tem-proxy-cond-go",
+              "leftValue": "={{ $json.has_proxy }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        350,
+        200
+      ],
+      "id": "if-tem-proxy-go",
+      "name": "Tem Proxy? (Go)"
+    }
+  ],
+  "connections": {
+    "Inicializa a pagina Com Instance Fixa (Go)": {
+      "main": [
+        [
+          {
+            "node": "Campos Dinâmicos (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inicializa a pagina (Go)": {
+      "main": [
+        [
+          {
+            "node": "Campos Dinâmicos (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos Dinâmicos (Go)": {
+      "main": [
+        [
+          {
+            "node": "Pagina QR Code (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pagina QR Code (Go)": {
+      "main": [
+        [
+          {
+            "node": "Gera Html Dinâmico (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza qr code (Go)": {
+      "main": [
+        [
+          {
+            "node": "Sanitizar Instance (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitizar Instance (Go)": {
+      "main": [
+        [
+          {
+            "node": "Gerar Token (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar Token (Go)": {
+      "main": [
+        [
+          {
+            "node": "Get Instances Go (QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instances Go (QR)": {
+      "main": [
+        [
+          {
+            "node": "Resolver Instância (Go QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Instância (Go QR)": {
+      "main": [
+        [
+          {
+            "node": "Já Conectado? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Já Conectado? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Responder Conectado (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Instância Existe? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instância Existe? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Tem Proxy? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Criar Instância (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Instância (Go)": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy (Go QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy (Go QR)": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy (Go QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy (Go QR)": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (Go QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (Go QR)": {
+      "main": [
+        [
+          {
+            "node": "Buscar QR (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar QR (Go)": {
+      "main": [
+        [
+          {
+            "node": "Extrair QR (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair QR (Go)": {
+      "main": [
+        [
+          {
+            "node": "Tem QR? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem QR? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Converte para Binário (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "É Passkey? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte para Binário (Go)": {
+      "main": [
+        [
+          {
+            "node": "Responder QR Binário (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Passkey? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Responder Passkey (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder Aguardando (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Proxy? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Buscar QR (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Proxy (Go QR)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

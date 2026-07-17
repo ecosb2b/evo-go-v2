@@ -1,0 +1,2864 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "let expected_port = 0;\nlet actual_port = 0;\nlet executed_p1 = false, executed_p5 = false, executed_p3 = false, executed_p4 = false, executed_tentativa5 = false;\n\n// Descobre qual caminho o fluxo tomou (agora só chega aqui se um proxy FOI aplicado)\ntry { executed_p1 = !!$('Set Proxy ').first(0, $runIndex); } catch(e) {}\ntry { executed_p5 = !!$('Set Proxy 5').first(0, $runIndex); } catch(e) {}\ntry { executed_p3 = !!$('Set Proxy (3)').first(0, $runIndex); } catch(e) {}\ntry { executed_p4 = !!$('Set Proxy (4)').first(0, $runIndex); } catch(e) {}\ntry { executed_tentativa5 = !!$('Set Proxy (5)').first(0, $runIndex); } catch(e) {}\n\nif (executed_p1) {\n    try { expected_port = $('Hub ').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n    try { actual_port = $('Set Proxy ').first(0, $runIndex).json.proxy.proxy.port; } catch(e) {}\n} else if (executed_p5) {\n    try { expected_port = $('Hub 5').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n    try { actual_port = $('Set Proxy 5').first(0, $runIndex).json.proxy.proxy.port; } catch(e) {}\n} else if (executed_p3) {\n    try { expected_port = $('Hub Proxy 3').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n    try { actual_port = $('Set Proxy (3)').first(0, $runIndex).json.proxy.proxy.port; } catch(e) {}\n} else if (executed_p4) {\n    try { expected_port = $('Hub Proxy 4').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n    try { actual_port = $('Set Proxy (4)').first(0, $runIndex).json.proxy.proxy.port; } catch(e) {}\n} else if (executed_tentativa5) {\n    try { expected_port = $('Hub Proxy 5').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n    try { actual_port = $('Set Proxy (5)').first(0, $runIndex).json.proxy.proxy.port; } catch(e) {}\n}\n\n// Entrega as duas para o Proxy Confere comparar\nreturn { json: { expected_port: Number(expected_port || 0), actual_port: Number(actual_port || 0) } };"
+      },
+      "name": "Definir Porta Esperada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11888,
+        10560
+      ],
+      "id": "4f2a8da0-e958-421a-b4b3-9d7281fd770b"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.actual_port }}",
+              "operation": "equal",
+              "value2": "={{ $json.expected_port }}"
+            }
+          ]
+        }
+      },
+      "name": "Proxy Confere?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        12112,
+        10560
+      ],
+      "id": "c19d0885-d312-41ba-bbc4-254d03fe3e24"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "69c56103-1140-4fbc-9b26-e11c1153b256",
+              "leftValue": "={{ $('Hub ').item.json.proxy?.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Porta 1 > 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2928,
+        11200
+      ],
+      "id": "3abf3e49-491c-4f26-a70c-552c88525881"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8df6fae1-0d8e-46b2-a5d1-f41d3d50af82",
+              "leftValue": "={{ $('Hub 5').item.json.proxy?.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Porta 2 > 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5392,
+        11184
+      ],
+      "id": "dfd749bc-6bfe-4d24-976b-988e26fb3c1c"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox \nSET status = 'RETRY', \n    next_attempt_at = NOW() + INTERVAL '10 minutes', \n    last_error = $2\nWHERE id = $1::uuid;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "=={{ $('Loop Over Items1').item.json.id }}\n{{ '[' + ($('Hub ').item?.json?.proxy?.empresa_id || $('Hub 5').item?.json?.proxy?.empresa_id || $('Hub Proxy 3').item?.json?.proxy?.empresa_id || $('Hub Proxy 4').item?.json?.proxy?.empresa_id || $('Hub Proxy 5').item?.json?.proxy?.empresa_id || 'Desconhecida') + ' - ' + ($('Hub ').item?.json?.proxy?.maquina_nome || $('Hub 5').item?.json?.proxy?.maquina_nome || $('Hub Proxy 3').item?.json?.proxy?.maquina_nome || $('Hub Proxy 4').item?.json?.proxy?.maquina_nome || $('Hub Proxy 5').item?.json?.proxy?.maquina_nome || 'Desconhecida') + '] ' + ($prevNode.name.includes('Morto') ? 'Falha na Prova de Vida (Túnel sem navegação) - todas as 4 tentativas de proxy esgotadas' : ($prevNode.name.includes('Desativar') ? 'Nenhum proxy disponível/válido - envio BLOQUEADO por segurança' : ($prevNode.name.includes('Hub') ? 'Hub Recusou: Nenhum proxy disponível' : 'Evolution não aplicou o Proxy'))) }}"
+        }
+      },
+      "name": "Espera Inteligente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        12336,
+        11488
+      ],
+      "id": "e34fc432-e37c-41b8-961e-653403da22eb",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "worker-fila",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        12400
+      ],
+      "id": "96c4dad5-e0ce-4282-9ac1-afc8ebfedbca",
+      "name": "Webhook1",
+      "webhookId": "b13a81d4-f7f9-4b58-b9e8-30d4b1fee3c1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1360,
+        12400
+      ],
+      "id": "b28841da-c47e-44bb-bd4a-d40bc67093f4",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "amount": "={{\n  (function() {\n    const webhookData = $items(\"Webhook1\")[0].json.body;\n    const size = webhookData.fila_tamanho || 0;\n    if (size >= 50) return Math.floor(Math.random() * 11) + 15;\n    else if (size >= 35) return Math.floor(Math.random() * 6) + 10;\n    else if (size >= 20) return Math.floor(Math.random() * 5) + 5;\n    else return Math.floor(Math.random() * 3) + 2;\n  })()\n}}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1584,
+        11280
+      ],
+      "id": "39815aaf-c1c3-4162-b5a7-a5434163623a",
+      "name": "Wait (Anti-bot)1",
+      "webhookId": "85c0bc10-4330-48f6-a359-263e65a84c45"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"id\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "285d39c7-d3a8-43b8-88c3-142fea5261fb",
+      "name": "Has Item?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        11280
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "baseUrl",
+              "value": "http://177.153.51.196:8080"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $json.instance }}"
+            },
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1ec11615-cda4-43f1-a2ed-97f8ab0855f5",
+      "name": "Set BaseURL1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        11280
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\n// CORREÇÃO: preferir_mesma_empresa=true nesta 1ª tentativa - o Hub vai tentar\n// priorizar um proxy da MESMA empresa_id usada da última vez por essa instância\n// (menos variação de IP de saída = menor risco de o WhatsApp desconfiar do número),\n// caindo de volta para a seleção normal (geo/carga) se não achar disponível.\nconst dataObj = { limite_envios: 50, instance: $('Set BaseURL1').item.json.instance, preferir_mesma_empresa: true };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { ...$json, req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        11280
+      ],
+      "id": "6bc97f04-f124-4b55-8a54-afe25ee73c9c"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2480,
+        11280
+      ],
+      "id": "221a6b19-472a-4ff5-a321-06ed24dfd8bc",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0a16d13d-136c-4697-bbb6-72ff378408c3",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Hub ",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2704,
+        11280
+      ],
+      "id": "c60d7026-645f-4926-97a5-8de525e3ac40"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub ').item.json.proxy.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3152,
+        11136
+      ],
+      "id": "836a064e-a797-4b00-9eae-c579dd749bda",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5d1a0e20-ed14-48be-97f0-6d8656dd09a0",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Ping 1 OK1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3376,
+        11136
+      ],
+      "id": "fc6e2727-0fb7-49c2-9ad9-a926bf531d67"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub ').item.json.proxy.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        4272,
+        10288
+      ],
+      "id": "3486642c-8214-4363-9713-ccace97fd357",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst port = $('Hub ').item.json.proxy.porta || 0;\nconst dataObj = { porta: port };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Morto ",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        11248
+      ],
+      "id": "96a51364-f8c0-4131-9a1c-ea15616088e5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Morto ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        4496,
+        11248
+      ],
+      "id": "a8616984-05b1-494c-9a71-1f759621c0d8",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\n// CORREÇÃO: preferir_mesma_empresa=true também na 2ª tentativa - mesmo raciocínio\n// da 1ª: tentar manter o número saindo pela mesma empresa_id de sempre antes de\n// cair para o critério puramente geográfico/de carga.\nconst dataObj = { limite_envios: 50, instance: $('Set BaseURL1').item.json.instance, preferir_mesma_empresa: true };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        11248
+      ],
+      "id": "3c8d070c-9ade-4332-9774-faa45994dd34"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        4944,
+        11248
+      ],
+      "id": "dfc66f77-21d7-4151-aea0-67658edbb6c5",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5dcade8d-4d5d-4101-93b8-9e724e3858a7",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Hub 5",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5168,
+        11248
+      ],
+      "id": "2f507fe1-b2ca-44d4-b359-4124487e05a8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bfbe303f-b8cf-47fb-b1cc-8c11764f5682",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Ping 2 OK1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5840,
+        10672
+      ],
+      "id": "07c8aefd-09cc-4292-a832-9d56ef54442c"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub 5').item.json.proxy.porta }}\",\n  \"protocol\": \"http\"\n}\n",
+        "options": {}
+      },
+      "name": "Set Proxy 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        6736,
+        10560
+      ],
+      "id": "e929cf5d-ac4c-4735-abea-3c29e17189a7",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": false,\n  \"host\": \"\",\n  \"port\": 0,\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Desativar Proxy1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        10544,
+        10896
+      ],
+      "id": "2773f304-dcbd-4712-aee0-443ad785ab64",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.athenesistemas.com.br/webhook/send-message",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Loop Over Items1').item.json.remote_jid }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Loop Over Items1').item.json.message_text }}"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $('Set BaseURL1').item.json.instance }}"
+            },
+            {
+              "name": "message_type",
+              "value": "={{ $('Loop Over Items1').item.json.message_type || 'text'}}"
+            },
+            {
+              "name": "file_url",
+              "value": "={{ $('Loop Over Items1').item.json.file_url || ''}}"
+            },
+            {
+              "name": "file_b64",
+              "value": "={{ $('Loop Over Items1').item.json.file_b64 || ''}}"
+            },
+            {
+              "name": "file_name",
+              "value": "={{ $('Loop Over Items1').item.json.file_name || ''}}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $('Loop Over Items1').item.json.mime_type || ''}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Loop Over Items1').item.json.caption || ''}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "521d43fd-2b85-42b9-9adb-62c1760f98db",
+      "name": "Redigir/Enviar1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        12336,
+        10480
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ Number( $json.statusCode ?? $json.response?.statusCode ?? $json.status ?? $json.response?.status ?? $json.error?.status ?? $json.error?.statusCode ?? $json.error?.response?.status ?? 500 ) }}",
+              "operation": "largerEqual",
+              "value2": 400
+            }
+          ]
+        }
+      },
+      "name": "IF Falhou?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        12560,
+        10480
+      ],
+      "id": "114b9312-cafa-4d46-9357-efb56bd7cce4"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.whatsapp_outbox o\nSET\n  status         = 'SENT',\n  sent_at        = COALESCE(o.sent_at, NOW()),\n  last_error     = NULL,\n  provider_msg_id = CASE\n    WHEN o.provider_msg_id IS NOT NULL THEN o.provider_msg_id\n    WHEN EXISTS (\n      SELECT 1 FROM public.whatsapp_outbox x\n      WHERE x.provider_msg_id = $2 AND x.id <> $1::uuid\n    ) THEN o.provider_msg_id\n    ELSE $2\n  END\nWHERE o.id = $1::uuid\n  AND o.status IN ('SENDING','RETRY','QUEUED')\nRETURNING o.id, o.provider_msg_id;",
+        "options": {
+          "queryReplacement": "={{ $('Loop Over Items1').item.json.id }}\n{{ $json.body?.key?.id ?? $json.body?.data?.key?.id ?? $json.key?.id ?? null }}"
+        }
+      },
+      "name": "Outbox UPDATE (SENT)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        12784,
+        11328
+      ],
+      "id": "614e907b-bbc2-4229-953f-8691e07ecb20",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox\nSET\n  status = CASE\n             WHEN attempt_count + 1 >= 5 OR $2 = ANY(ARRAY[401,403,404]) THEN 'FAILED'\n             ELSE 'RETRY'\n           END,\n  -- ADICIONAMOS O TEMPO DE ESPERA AQUI NAS FALHAS COMUNS:\n  next_attempt_at = CASE \n                      WHEN attempt_count + 1 < 5 AND NOT ($2 = ANY(ARRAY[401,403,404])) THEN NOW() + INTERVAL '5 minutes'\n                      ELSE NULL\n                    END,\n  last_error      = LEFT($3::text, 300),\n  last_attempt_at = NOW(),\n  attempt_count   = attempt_count + 1\nWHERE id = $1::uuid\n  AND status IN ('SENDING','RETRY')\nRETURNING id;",
+        "options": {
+          "queryReplacement": "=={{ $('Loop Over Items1').item.json.id }}\n{{ Number( $json.statusCode ?? $json.response?.statusCode ?? $json.status ?? $json.response?.status ?? $json.error?.status ?? $json.error?.statusCode ?? $json.error?.response?.status ?? 500 ) }}\n{{ '[' + ($('Hub ').item?.json?.proxy?.empresa_id || $('Hub 5').item?.json?.proxy?.empresa_id || $('Hub Proxy 3').item?.json?.proxy?.empresa_id || $('Hub Proxy 4').item?.json?.proxy?.empresa_id || $('Hub Proxy 5').item?.json?.proxy?.empresa_id || 'Desconhecida') + ' - ' + ($('Hub ').item?.json?.proxy?.maquina_nome || $('Hub 5').item?.json?.proxy?.maquina_nome || $('Hub Proxy 3').item?.json?.proxy?.maquina_nome || $('Hub Proxy 4').item?.json?.proxy?.maquina_nome || $('Hub Proxy 5').item?.json?.proxy?.maquina_nome || 'Desconhecida') + '] ' + JSON.stringify($json.error ?? $json) }}"
+        }
+      },
+      "name": "Outbox UPDATE (RETRY/FAILED)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        12784,
+        10384
+      ],
+      "id": "c7097788-bd37-4a62-9441-f2a2ace2574d",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "let port = 0;\nlet executed_p1 = false, executed_p5 = false, executed_p3 = false, executed_p4 = false, executed_tentativa5 = false, executed_desativar = false;\n\n// Pergunta isoladamente\ntry { executed_p1 = !!$('Set Proxy ').first(0, $runIndex); } catch(e) {}\ntry { executed_p5 = !!$('Set Proxy 5').first(0, $runIndex); } catch(e) {}\ntry { executed_p3 = !!$('Set Proxy (3)').first(0, $runIndex); } catch(e) {}\ntry { executed_p4 = !!$('Set Proxy (4)').first(0, $runIndex); } catch(e) {}\ntry { executed_tentativa5 = !!$('Set Proxy (5)').first(0, $runIndex); } catch(e) {}\ntry { executed_desativar = !!$('Desativar Proxy1').first(0, $runIndex); } catch(e) {}\n\nif (executed_p1) {\n    try { port = $('Hub ').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n} else if (executed_p5) {\n    try { port = $('Hub 5').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n} else if (executed_p3) {\n    try { port = $('Hub Proxy 3').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n} else if (executed_p4) {\n    try { port = $('Hub Proxy 4').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n} else if (executed_tentativa5) {\n    try { port = $('Hub Proxy 5').first(0, $runIndex).json.proxy.porta; } catch(e) {}\n} else if (executed_desativar) {\n    port = 0;\n}\n\nconst SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst dataObj = { porta: port, instance: $('Set BaseURL1').item.json.instance };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\n\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Incremento1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13008,
+        11328
+      ],
+      "id": "18e36226-1ee2-4b8c-b975-431c155c72e0"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-increment",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Avisar Hub (+1)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        13232,
+        12336
+      ],
+      "id": "d5e3fb52-3486-43d7-89d9-8c2dca737306",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ Number( $('Redigir/Enviar1').item.json.statusCode ?? $('Redigir/Enviar1').item.json.response?.statusCode ?? $('Redigir/Enviar1').item.json.status ?? $('Redigir/Enviar1').item.json.response?.status ?? $('Redigir/Enviar1').item.json.error?.status ?? $('Redigir/Enviar1').item.json.error?.statusCode ?? $('Redigir/Enviar1').item.json.error?.response?.status ?? 500 ) }}",
+              "value2": "404"
+            }
+          ]
+        }
+      },
+      "name": "É Número Inexistente?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        13008,
+        10384
+      ],
+      "id": "3601472f-8029-45c7-a273-0023c428c5af"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO whatsapp_blacklist (instance, remote_jid, notes)\nVALUES ($1, $2, 'Bloqueio Automático: Número não existe no WhatsApp (Erro 404)')\nON CONFLICT (instance, remote_jid) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ $('Loop Over Items1').item.json.instance }}\n{{ $('Loop Over Items1').item.json.remote_jid }}"
+        }
+      },
+      "name": "Execute a SQL query (numero Inexistente)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        13232,
+        11472
+      ],
+      "id": "ab5422f1-138b-4e66-a9b3-1045961254d1",
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox\nSET \n  status = 'SENDING',\n  last_attempt_at = NOW(),\n  attempt_count = attempt_count + 1\nWHERE id IN (\n  SELECT id\n  FROM whatsapp_outbox\n  WHERE instance = $1\n    AND (\n      (status IN ('QUEUED', 'RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))\n      OR \n      (status = 'SENDING' AND last_attempt_at < NOW() - INTERVAL '10 minutes')\n    )\n  AND api_version = 'v1'\n  ORDER BY created_at ASC\n  LIMIT 50\n  FOR UPDATE SKIP LOCKED\n)\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ $('Webhook1').item.json.body.instance }}"
+        }
+      },
+      "id": "5e3ca8c8-aca8-4c5c-b619-ee92680eb3a1",
+      "name": "Reserve & Fetch1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        912,
+        12400
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "let items = $input.all();\n\n// Se houver mais de 5 mensagens reservadas no lote atual, embaralha a ordem de envio\nif (items.length > 5) {\n    // Algoritmo de Fisher-Yates para garantir um embaralhamento perfeito e aleatório\n    for (let i = items.length - 1; i > 0; i--) {\n        const j = Math.floor(Math.random() * (i + 1));\n        // Troca os itens de lugar\n        [items[i], items[j]] = [items[j], items[i]];\n    }\n}\n\nreturn items;"
+      },
+      "id": "d8ceffb3-b096-47c4-a119-0c577ef58e06",
+      "name": "Embaralhar Lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        12400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub 5').item.json.proxy.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        5616,
+        10672
+      ],
+      "id": "82252473-23f0-4800-a297-a7a6287fcd58",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3600,
+        11200
+      ],
+      "id": "70ead074-38d8-4d50-90f9-4c60dfa75af5",
+      "name": "Wait",
+      "webhookId": "92b50c87-06d1-48da-a937-e3c68fd77ccf"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub ').item.json.proxy.porta }}",
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3824,
+        11200
+      ],
+      "id": "a33b2526-9386-497d-9020-39d37489242c",
+      "name": "Ping Salva-Vidas 1",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8501e690-bb7d-481b-9d53-2b21dcf09dc2",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4048,
+        11200
+      ],
+      "id": "61ff8d4b-d035-4d84-9c09-df875f9b914d",
+      "name": "IF Salva-Vidas 1"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6064,
+        10672
+      ],
+      "id": "ee24a28b-0a46-40b6-ae4b-12edeaf9b2d8",
+      "name": "Wait1",
+      "webhookId": "4eeca5ff-866a-4015-b40a-c84e2f22778d"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub 5').item.json.proxy.porta }}",
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6288,
+        10672
+      ],
+      "id": "6ad2a430-ba57-4868-bb5e-1a6cd284686e",
+      "name": "Ping Salva-Vidas 2",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "2af2a607-dc06-4b2f-8776-2a987f6ccd29",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        6512,
+        10672
+      ],
+      "id": "cd1bd981-d6df-445c-9347-03af41e3177b",
+      "name": "IF Salva-Vidas 2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst port = $('Hub 5').item.json.proxy.porta || 0;\nconst dataObj = { porta: port };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Morto 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6736,
+        11136
+      ],
+      "id": "163a9800-5493-4b4c-b75f-0ec2dc843089"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Morto 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        6960,
+        11136
+      ],
+      "id": "7ba58f60-b6a4-4ad2-852a-ae448c7fa0d3",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\n// Tentativa 3 de 5 (ultima com preferir_mesma_empresa=true). Design: 3 tentativas tentam manter\n// o mesmo tunel/empresa (consistencia de IP de saida); se as 3 falharem, assume-se que pode nao\n// haver nenhum computador dessa empresa online agora, e as 2 ultimas tentativas (4 e 5) liberam\n// a busca para qualquer empresa.\nconst dataObj = { limite_envios: 50, instance: $('Set BaseURL1').item.json.instance, preferir_mesma_empresa: true };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7184,
+        11136
+      ],
+      "id": "ab687407-baa7-4451-a04a-5e6b1ab395d1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        7408,
+        11136
+      ],
+      "id": "e316e34c-94da-4074-af2f-971e156fd809",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223303",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Hub Proxy 3",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7632,
+        11136
+      ],
+      "id": "66953b7c-e4aa-41b6-b8ca-5207ee18a295"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223305",
+              "leftValue": "={{ $('Hub Proxy 3').item.json.proxy?.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Porta 3 > 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7856,
+        11056
+      ],
+      "id": "8fb7581f-a22f-49c3-b6e7-c58fa419952b"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 3').item.json.proxy.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping Proxy 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        8080,
+        10992
+      ],
+      "id": "5bdaefe3-b389-4e09-82a8-17392e205f2f",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223308",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Ping 3 OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        8304,
+        10992
+      ],
+      "id": "744507a7-1f71-4dc7-b584-bf50a515e6fc"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy 3').item.json.proxy.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy (3)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        9200,
+        10752
+      ],
+      "id": "58eeb9fd-2d59-4b3a-9a16-12a4976d6652",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        8528,
+        11056
+      ],
+      "id": "30d19ab6-16b7-4bb2-8950-6bc455f96d6e",
+      "name": "Wait Proxy 3",
+      "webhookId": "aa11bb22-cc33-4d44-8e55-f66011223312"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 3').item.json.proxy.porta }}",
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8752,
+        11056
+      ],
+      "id": "df14be20-7095-436d-a5a4-940b9939d468",
+      "name": "Ping Salva-Vidas 3",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223314",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        8976,
+        11056
+      ],
+      "id": "ed785e12-aef5-4c33-87e0-30f5ed897678",
+      "name": "IF Salva-Vidas 3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst port = $('Hub Proxy 3').item.json.proxy.porta || 0;\nconst dataObj = { porta: port };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Morto 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9200,
+        11104
+      ],
+      "id": "11d50af9-1b41-47a0-9ff9-1fcd16c7e3c3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Morto 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        9424,
+        11104
+      ],
+      "id": "5890f038-831f-4228-9d34-905c970ee29d",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\n// Tentativa 4 de 5: primeira tentativa de EMPRESA DIFERENTE (preferir_mesma_empresa omitido/false).\n// As 3 primeiras tentativas (HMAC / HMAC 5 / HMAC Proxy 3) ja tentaram a mesma empresa da ultima\n// vez; se todas falharam, pode ser que nao haja nenhum computador daquela empresa ligado agora -\n// entao a partir daqui o Hub escolhe livremente (geo/carga), sem essa restricao.\nconst dataObj = { limite_envios: 50, instance: $('Set BaseURL1').item.json.instance };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9648,
+        11104
+      ],
+      "id": "f2f880bd-1dfc-4359-94fd-de38dfea4ab1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        9872,
+        11104
+      ],
+      "id": "d7d13ab2-4dc7-48e1-bf2d-7a3e405fe097",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223320",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Hub Proxy 4",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        10096,
+        11104
+      ],
+      "id": "10745cfd-06dc-4016-b76f-6dac4963a297"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223322",
+              "leftValue": "={{ $('Hub Proxy 4').item.json.proxy?.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Porta 4 > 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        10320,
+        11104
+      ],
+      "id": "b88509f1-0d9a-4ffc-8397-6f5605a967b2"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 4').item.json.proxy.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping Proxy 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        10544,
+        11152
+      ],
+      "id": "680a8043-18c3-4138-8cbc-4fe77632a8f3",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 3,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223325",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Ping 4 OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        10768,
+        11152
+      ],
+      "id": "8666149c-f27a-46ee-9fc6-9acf29986d5e"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy 4').item.json.proxy.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy (4)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        11664,
+        11088
+      ],
+      "id": "99c87edb-549a-45d9-9ed4-d607cb06e651",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        10992,
+        11232
+      ],
+      "id": "3e009d42-fbaa-4add-9fb8-6d487e3bb96f",
+      "name": "Wait Proxy 4",
+      "webhookId": "aa11bb22-cc33-4d44-8e55-f66011223329"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 4').item.json.proxy.porta }}",
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        11216,
+        11232
+      ],
+      "id": "c281e332-5df7-4669-bb68-a0aefda2e9a5",
+      "name": "Ping Salva-Vidas 4",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223331",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        11440,
+        11232
+      ],
+      "id": "5a035ddf-f402-4183-9aab-6b142ddee9cb",
+      "name": "IF Salva-Vidas 4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst port = $('Hub Proxy 4').item.json.proxy.porta || 0;\nconst dataObj = { porta: port };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Morto 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        11888,
+        11280
+      ],
+      "id": "3239fb50-e704-45e5-9a4d-b038f5b7a830"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Morto 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        12112,
+        11280
+      ],
+      "id": "d14a3be8-0c8b-42f6-b585-e2a600597e58",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## FIX: Bloqueio de envio sem proxy\n\nAgora o fluxo tenta ate 4 proxies diferentes (cada um com dupla checagem de vida: Ping + Ping Salva-Vidas) antes de desistir. So depois de esgotar os 4 (ou se o Hub nao retornar nenhum proxy valido em qualquer etapa) e que vai para \"Espera Inteligente\" (retry em 10min) - nunca envia a mensagem sem proxy aplicado com sucesso.\n\n### Afinidade de empresa_id\nAs 2 primeiras tentativas (HMAC / HMAC 5) enviam preferir_mesma_empresa=true ao Hub, priorizando reaproveitar o mesmo tunel/empresa da ultima vez que essa instancia enviou. As tentativas 3 e 4 seguem sem preferencia, para maximizar a chance de achar QUALQUER proxy livre.\n\n### Variaveis de ambiente do n8n (obrigatorias)\n- ATHENE_SECRET_KEY: mesma chave HMAC configurada no Hub (antes hardcoded em 9 nos Code).\n- ATHENE_GATEWAY_IP: IP do gateway Docker usado para falar com o proxy local (antes hardcoded como 172.18.0.1 em 12 lugares - Ping, Ping Salva-Vidas e Set Proxy x4).\n\n### Checagem de vida sem terceiros\nPing e Ping Salva-Vidas agora batem em https://api-hub.athenesistemas.com.br/api/whoami (endpoint novo no Hub) em vez de checkip.amazonaws.com / icanhazip.com, removendo a dependencia de 2 servicos publicos de terceiros.",
+        "height": 260,
+        "width": 340,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4528,
+        10144
+      ],
+      "id": "2fbfa81f-56fc-4888-b474-5ab5815ce93a",
+      "name": "Sticky Note - Fix Proxy",
+      "height": 420,
+      "width": 380
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\n// Tentativa 4 de 5: primeira tentativa de EMPRESA DIFERENTE (preferir_mesma_empresa omitido/false).\n// As 3 primeiras tentativas (HMAC / HMAC 5 / HMAC Proxy 3) ja tentaram a mesma empresa da ultima\n// vez; se todas falharam, pode ser que nao haja nenhum computador daquela empresa ligado agora -\n// entao a partir daqui o Hub escolhe livremente (geo/carga), sem essa restricao.\nconst dataObj = { limite_envios: 50, instance: $('Set BaseURL1').item.json.instance };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        9948,
+        13604
+      ],
+      "id": "f3eeeaf8-2bfd-4230-9388-cc3455770b0d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        10172,
+        13604
+      ],
+      "id": "ae36dbdf-7908-4392-8c09-b65a64fb9a6a",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223320",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Hub Proxy 5",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        10396,
+        13604
+      ],
+      "id": "b31588aa-c60e-47c1-ba50-2745e85e6fbe"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223322",
+              "leftValue": "={{ $('Hub Proxy 5').item.json.proxy?.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Porta 5 > 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        10620,
+        13604
+      ],
+      "id": "b184562a-7624-43fc-8092-f059c4686476"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 5').item.json.proxy.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping Proxy 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        10844,
+        13652
+      ],
+      "id": "14d43808-639f-4427-91d7-5b3509d54e21",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 3,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223325",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "IF Ping 5 OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        11068,
+        13652
+      ],
+      "id": "b7a568bd-2cc5-40f1-802d-e12d94a29cbe"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Set BaseURL1').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy 5').item.json.proxy.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy (5)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        11964,
+        13588
+      ],
+      "id": "18c6d99d-10f6-48b5-9999-f82dbfdade54",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        11292,
+        13732
+      ],
+      "id": "d8a96cd7-fe10-4d78-9879-fc0e874bde98",
+      "name": "Wait Proxy 5",
+      "webhookId": "667268c8-c039-46b0-9fc0-542b174c375c"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Hub Proxy 5').item.json.proxy.porta }}",
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        11516,
+        13732
+      ],
+      "id": "43165c41-e6b4-4832-8e45-e48758b1c823",
+      "name": "Ping Salva-Vidas 5",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa11bb22-cc33-4d44-8e55-f66011223331",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        11740,
+        13732
+      ],
+      "id": "912f3b4b-8f64-4140-b24d-8ba0c97cfdf3",
+      "name": "IF Salva-Vidas 5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst port = $('Hub Proxy 5').item.json.proxy.porta || 0;\nconst dataObj = { porta: port };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Morto 5",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12188,
+        13780
+      ],
+      "id": "cc06f845-24da-426e-a81a-5c4aba52a846"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Morto 5",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        12412,
+        13780
+      ],
+      "id": "ccde4483-b4be-4af5-86b2-83dafc799c41",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## FIX (2026-07-14): 5 tentativas de proxy, split 3/2 de afinidade de empresa\n\nO fluxo agora tenta ATE 5 proxies antes de desistir (era 4). Motivo do split 3/2:\n\n- Tentativas 1, 2 e 3 (HMAC / HMAC 5 / HMAC Proxy 3): preferir_mesma_empresa=true - tentam manter o numero saindo pela MESMA empresa/tunel de sempre (menor variacao de IP de saida = menor risco de o WhatsApp desconfiar).\n- Tentativas 4 e 5 (HMAC Proxy 4 / HMAC Proxy 5): sem a preferencia - se as 3 primeiras falharem, pode ser que nao haja nenhum computador daquela empresa online agora, entao o Hub busca livremente (geo/carga) em vez de continuar insistindo numa empresa indisponivel.\n\nTentativa 5 e clone estrutural da tentativa 4 (mesmo padrao Ping + Ping Salva-Vidas + Set Proxy + Hub Morto). Ao esgotar a 5, vai para Espera Inteligente (retry em 10min) - nunca envia sem proxy aplicado com sucesso.",
+        "height": 320,
+        "width": 400,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        9648,
+        13600
+      ],
+      "id": "b3c02c3a-58bc-4ec4-b11b-e651b018e38b",
+      "name": "Sticky Note - Fix Afinidade 3-2-5tentativas"
+    }
+  ],
+  "connections": {
+    "Definir Porta Esperada": {
+      "main": [
+        [
+          {
+            "node": "Proxy Confere?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proxy Confere?": {
+      "main": [
+        [
+          {
+            "node": "Redigir/Enviar1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Porta 1 > 1": {
+      "main": [
+        [
+          {
+            "node": "Ping ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Porta 2 > 1": {
+      "main": [
+        [
+          {
+            "node": "Ping 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera Inteligente": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Reserve & Fetch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait (Anti-bot)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (Anti-bot)1": {
+      "main": [
+        [
+          {
+            "node": "Has Item?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Item?1": {
+      "main": [
+        [
+          {
+            "node": "Set BaseURL1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set BaseURL1": {
+      "main": [
+        [
+          {
+            "node": "HMAC ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC ": {
+      "main": [
+        [
+          {
+            "node": "Hub ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub ": {
+      "main": [
+        [
+          {
+            "node": "IF Hub ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hub ": {
+      "main": [
+        [
+          {
+            "node": "IF Porta 1 > 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping ": {
+      "main": [
+        [
+          {
+            "node": "IF Ping 1 OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ping 1 OK1": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy ": {
+      "main": [
+        [
+          {
+            "node": "Definir Porta Esperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Morto ": {
+      "main": [
+        [
+          {
+            "node": "Hub Morto ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Morto ": {
+      "main": [
+        [
+          {
+            "node": "HMAC 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC 5": {
+      "main": [
+        [
+          {
+            "node": "Hub 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub 5": {
+      "main": [
+        [
+          {
+            "node": "IF Hub 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hub 5": {
+      "main": [
+        [
+          {
+            "node": "IF Porta 2 > 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ping 2 OK1": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "Definir Porta Esperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Desativar Proxy1": {
+      "main": [
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redigir/Enviar1": {
+      "main": [
+        [
+          {
+            "node": "IF Falhou?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Falhou?1": {
+      "main": [
+        [
+          {
+            "node": "Outbox UPDATE (RETRY/FAILED)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outbox UPDATE (SENT)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox UPDATE (SENT)1": {
+      "main": [
+        [
+          {
+            "node": "HMAC Incremento1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox UPDATE (RETRY/FAILED)1": {
+      "main": [
+        [
+          {
+            "node": "É Número Inexistente?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Incremento1": {
+      "main": [
+        [
+          {
+            "node": "Avisar Hub (+1)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar Hub (+1)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Número Inexistente?1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query (numero Inexistente)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query (numero Inexistente)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserve & Fetch1": {
+      "main": [
+        [
+          {
+            "node": "Embaralhar Lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embaralhar Lote": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping 2": {
+      "main": [
+        [
+          {
+            "node": "IF Ping 2 OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas 1": {
+      "main": [
+        [
+          {
+            "node": "IF Salva-Vidas 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Salva-Vidas 1": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Morto ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas 2": {
+      "main": [
+        [
+          {
+            "node": "IF Salva-Vidas 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Salva-Vidas 2": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Morto 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Morto 2": {
+      "main": [
+        [
+          {
+            "node": "Hub Morto 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Morto 2": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy 3": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy 3": {
+      "main": [
+        [
+          {
+            "node": "IF Hub Proxy 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hub Proxy 3": {
+      "main": [
+        [
+          {
+            "node": "IF Porta 3 > 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Porta 3 > 1": {
+      "main": [
+        [
+          {
+            "node": "Ping Proxy 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Proxy 3": {
+      "main": [
+        [
+          {
+            "node": "IF Ping 3 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ping 3 OK": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (3)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Proxy 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (3)": {
+      "main": [
+        [
+          {
+            "node": "Definir Porta Esperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Proxy 3": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas 3": {
+      "main": [
+        [
+          {
+            "node": "IF Salva-Vidas 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Salva-Vidas 3": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (3)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Morto 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Morto 3": {
+      "main": [
+        [
+          {
+            "node": "Hub Morto 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Morto 3": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy 4": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy 4": {
+      "main": [
+        [
+          {
+            "node": "IF Hub Proxy 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hub Proxy 4": {
+      "main": [
+        [
+          {
+            "node": "IF Porta 4 > 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Porta 4 > 1": {
+      "main": [
+        [
+          {
+            "node": "Ping Proxy 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Proxy 4": {
+      "main": [
+        [
+          {
+            "node": "IF Ping 4 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ping 4 OK": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (4)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Proxy 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (4)": {
+      "main": [
+        [
+          {
+            "node": "Definir Porta Esperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Proxy 4": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas 4": {
+      "main": [
+        [
+          {
+            "node": "IF Salva-Vidas 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Salva-Vidas 4": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (4)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Morto 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Morto 4": {
+      "main": [
+        [
+          {
+            "node": "Hub Morto 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Morto 4": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "IF Hub Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hub Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "IF Porta 5 > 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Porta 5 > 1": {
+      "main": [
+        [
+          {
+            "node": "Ping Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "IF Ping 5 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Ping 5 OK": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (5)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Proxy 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (5)": {
+      "main": [
+        [
+          {
+            "node": "Definir Porta Esperada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Proxy 5": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas 5": {
+      "main": [
+        [
+          {
+            "node": "IF Salva-Vidas 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Salva-Vidas 5": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (5)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Morto 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Morto 5": {
+      "main": [
+        [
+          {
+            "node": "Hub Morto 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Morto 5": {
+      "main": [
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  }
+}

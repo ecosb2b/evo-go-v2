@@ -1,0 +1,1183 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "1bd1ae35-47d8-4c1e-be7b-337d8143adff",
+      "name": "A cada 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2288,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    c.*,\n    (\n        SELECT remote_jid\n        FROM whatsapp_outbox o\n        WHERE o.instance = c.instance_name\n          AND o.api_version != 'go'\n        ORDER BY created_at DESC\n        LIMIT 1\n    ) AS last_remote_jid\nFROM evolution_instance_monitor c\nWHERE c.enabled = true\n  AND c.api_version != 'go';",
+        "options": {}
+      },
+      "id": "ee536e14-e9b8-4df1-8428-4eae4075d417",
+      "name": "Carregar do Banco",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        1424
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "eb5e86ec-bff0-4a96-8725-37f7e3db438a",
+      "name": "Loop Instâncias",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -1840,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/instance/connectionState/{{ $json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "d0756b32-bc99-4fd4-be89-584bbcb1f4fd",
+      "name": "Checar Status (Inicial)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -1616,
+        1360
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is_connecting",
+              "leftValue": "={{ $json.instance?.state }}",
+              "rightValue": "connecting",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "1b5453db-2e50-4ef9-b6d8-751565508c0e",
+              "leftValue": "={{ $json.instance?.state }}",
+              "rightValue": "close",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "2893bd24-2dc0-4aff-82fe-f3b51f6c7f76",
+      "name": "Está Travada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "command": "=docker exec evolution_api-redis-1 redis-cli --scan --pattern 'evo:{{ $json.instance_name }}:*' | xargs -r docker exec evolution_api-redis-1 redis-cli DEL"
+      },
+      "id": "ca35a408-eda0-42a0-b75d-7928ced65e2e",
+      "name": "Limpar Redis (SSH)",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        -944,
+        1376
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "deV2EC4zcp5KKreY",
+          "name": "SSH Evo Server"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/instance/restart/{{ $('Loop Instâncias').item.json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9e46289c-a8e0-4058-98c3-056e9bb0feca",
+      "name": "Forçar Reconexão",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -496,
+        1392
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/instance/connectionState/{{ $('Loop Instâncias').item.json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "14423232-b3fd-45af-90c9-294494eb2121",
+      "name": "Re-Checar Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -48,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Recupera dados\nconst dbData = $('Loop Instâncias').item.json;\nconst apiData = $json;\n\n// --- CONFIGURAÇÕES ---\nconst HORA_INICIO = 8;\nconst HORA_FIM = 18;\nconst INTERVALO_MINUTOS = 120; // 2 Horas\nconst MAX_TENTATIVAS_AUTO_FIX = 3;\n\n// 1. Status Atual\nlet currentStatus = 'unknown';\nif (apiData.instance && apiData.instance.state) currentStatus = apiData.instance.state;\nelse if (apiData.state) currentStatus = apiData.state;\nelse if (apiData.status) currentStatus = apiData.status;\n\ncurrentStatus = String(currentStatus).toLowerCase();\n\n// 2. Define se está online\nconst isOnline = ['open', 'connected', 'online'].includes(currentStatus);\n\n// 3. Tratamento de Tempo e Tentativas\nconst now = new Date();\nconst lastNotifString = dbData.last_notification_at;\nlet tentativas = parseInt(dbData.auto_fix_attempts || 0);\n\nlet minutosDesdeUltima = 999999;\nif (lastNotifString) {\n    const lastDate = new Date(lastNotifString);\n    if (!isNaN(lastDate.getTime())) {\n        const diffMs = now.getTime() - lastDate.getTime();\n        minutosDesdeUltima = Math.floor(diffMs / 1000 / 60);\n    }\n}\n\n// 4. DECISÃO\nlet shouldNotify = false;\nlet statusMessage = \"DESCONHECIDO\";\nlet motivoBloqueio = \"\";\n\nif (isOnline) {\n    shouldNotify = false;\n    statusMessage = \"CONECTADO\";\n    tentativas = 0; // Reseta contador se voltar a funcionar\n    motivoBloqueio = \"Está online\";\n} else {\n    statusMessage = (currentStatus === 'connecting') ? \"FALHA (TENTANDO CONECTAR)\" : \"DESCONECTADO\";\n    \n    // Incrementa tentativa se vier da rota de auto-fix (Limpeza de Redis)\n    // Se o nó anterior foi o \"Re-Checar Status\", significa que houve uma tentativa de correção\n    tentativas++;\n\n    // Regra de Notificação:\n    // Avisa se (Já passou o intervalo de 2h) OU (Já tentou 3 vezes o auto-fix e continua OFF)\n    if (minutosDesdeUltima >= INTERVALO_MINUTOS || tentativas >= MAX_TENTATIVAS_AUTO_FIX) {\n        shouldNotify = true;\n        motivoBloqueio = tentativas >= MAX_TENTATIVAS_AUTO_FIX ? \"Excedeu tentativas de auto-fix\" : \"Intervalo de tempo atingido\";\n    } else {\n        shouldNotify = false;\n        motivoBloqueio = `Auto-fix em andamento (Tentativa ${tentativas})`;\n    }\n}\n\nreturn {\n  json: {\n    ...dbData,       \n    current_status_api: currentStatus,\n    status_msg_pt: statusMessage,\n    auto_fix_attempts: tentativas,\n    now_iso: now.toISOString(),\n    shouldNotify: shouldNotify,\n    debug_motivo: motivoBloqueio\n  }\n};"
+      },
+      "id": "e42a3437-3742-476e-9cfa-4c71f6e7bcf5",
+      "name": "Avaliar Lógica",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE evolution_instance_monitor\nSET\n  last_status = $1,\n  auto_fix_attempts = $5,\n  updated_at = $2,\n  last_status_change_at = CASE\n    WHEN last_status IS DISTINCT FROM $1 THEN $2\n    ELSE last_status_change_at\n  END,\n  last_notification_at = CASE\n    WHEN $3::boolean IS TRUE THEN $2\n    ELSE last_notification_at\n  END,\n  last_notification_status = CASE\n    WHEN $3::boolean IS TRUE THEN $1\n    ELSE last_notification_status\n  END\nWHERE id = $4\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ [ $json.current_status_api, $json.now_iso, $json.shouldNotify, $json.id, ($json.auto_fix_attempts || 0) ] }}"
+        }
+      },
+      "id": "523136b4-fec7-49fd-9b10-cd7c86b1aa7c",
+      "name": "Atualizar DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        400,
+        1472
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "notify_true",
+              "leftValue": "={{ $('Avaliar Lógica').item.json.shouldNotify }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "32fe9a64-0725-451b-b265-11a8259e0faa",
+      "name": "Precisa Notificar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        624,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Avaliar Lógica').item.json;\nconst tentativas = s.auto_fix_attempts || 0;\nconst statusMsg = (s.status_msg_pt || s.status || 'DESCONHECIDO').toString().trim();\nconst instance = s.instance_name;\n\nconst texto =\n  `⚠️ 🚨 *Alerta de Instância* 🚨\\n` +\n  `A instância *${instance}* está com status: *${statusMsg}*.\\n \\n` +\n  `🛠️ *Ações realizadas:* Fizemos ${tentativas} tentativas de recuperação automática (Redis Flush + Restart).\\n` +\n  `❌ *Resultado:* Sem sucesso até o momento.\\n \\n` +\n  `👉 *Ação necessária:* Verifique o dispositivo ou reconecte pelo link:\\n` +\n  `https://n8n.athenesistemas.com.br/webhook/.../${instance}`;\n\nreturn {\n  json: {\n    ...s,\n    notify_text: texto,\n    notify_whatsapp_number: s.notify_number_final,\n    notify_email: s.notify_email\n  }\n};"
+      },
+      "id": "d42dd0b7-48cf-4768-9c55-3295745e18d6",
+      "name": "Montar Msg",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        1312
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.notify_number_final }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b6009a70-4d11-4881-a336-988c90e24b65",
+      "name": "Tem WhatsApp?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.notify_email }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "14bb3b25-1593-4217-9ee4-2c9eab2ec1fe",
+      "name": "Tem E-mail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        1456
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.athenesistemas.com.br/webhook/whatsapp/outbox",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json.notify_whatsapp_number }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.notify_text }}"
+            },
+            {
+              "name": "instance",
+              "value": "Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9ee7b29c-448c-4927-bfcd-a89015d4a693",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1968,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "athenesistema@gmail.com",
+        "toEmail": "={{ $json.notify_email }}",
+        "subject": "Alerta: WhatsApp Desconectado",
+        "text": "={{ $json.notify_text }}",
+        "options": {}
+      },
+      "id": "79b6ca20-917d-4cf0-8330-3facc9316f4e",
+      "name": "Enviar Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        1376
+      ],
+      "webhookId": "0466a6f8-1d03-4748-82ab-60a1e799ee68",
+      "credentials": {
+        "smtp": {
+          "id": "RxzyLWXVtk62NgU7",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "051c5ad4-96a5-498d-81ef-4d2f0ac9720b",
+      "name": "Fim Loop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2192,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "e5e0b008-df06-40f5-b9d8-3c237c0029c1",
+      "name": "Aguardar 60s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        1392
+      ],
+      "webhookId": "1b092288-0672-46a2-bc4a-6f4e242490c6"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -720,
+        1376
+      ],
+      "id": "06d4942d-8872-4095-b61e-6bcdcab60f82",
+      "name": "Aguardar 5 segundos",
+      "webhookId": "d463343a-5d66-4c25-90fd-d49b27de3f80"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "is_connecting",
+              "leftValue": "={{ $json.instance?.state }}",
+              "rightValue": "connecting",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "1b5453db-2e50-4ef9-b6d8-751565508c0e",
+              "leftValue": "={{ $json.instance?.state }}",
+              "rightValue": "close",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "bedfc433-e8cf-4ffc-be48-d58990280b30",
+      "name": "Está Travada?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        1376
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "03d19a39-54e7-4d23-bcda-ea51b3284183",
+      "name": "Aguardar 30",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        848,
+        1376
+      ],
+      "webhookId": "1b092288-0672-46a2-bc4a-6f4e242490c6"
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/instance/connectionState/{{ $json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "6eb673c2-24c7-4b74-8d4f-f97a7d3a49fe",
+      "name": "Recheca Status Final",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1072,
+        1376
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b797f763-d4e5-4644-9338-0a3d00fff265",
+              "leftValue": "={{ $json.error?.response?.status }}",
+              "rightValue": 404,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1392,
+        1360
+      ],
+      "id": "dc24366d-850e-405b-be64-5207b0e9701e",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE evolution_instance_monitor SET enabled = false WHERE instance_name = $1",
+        "options": {
+          "queryReplacement": "={{ [ $('Loop Instâncias').item.json.instance_name ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1168,
+        1264
+      ],
+      "id": "9f779d68-393b-424e-8626-46225bbc9826",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst dataObj = { limite_envios: 50, instance: $('Loop Instâncias').item.json.instance_name };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy (Reconexao)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -704,
+        1232
+      ],
+      "id": "d0342122-f1a7-42de-ad5b-f9e662e4a611"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy (Reconexao)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -544,
+        1232
+      ],
+      "id": "500b11ff-8bac-40a4-ba38-8b087e63af86",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Loop Instâncias').item.json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy (Reconexao)').item.json.proxy?.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy (Reconexao)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -384,
+        1232
+      ],
+      "id": "e6962e48-be15-480c-b194-61bb703750a2",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "FIX (2026-07-14): antes desse ajuste, 'Forçar Reconexão' chamava /instance/restart direto, sem setar proxy antes - a reconexao usava o IP do proprio servidor. Igual ao GeraQRCode: agora busca o mesmo proxy que o Despachante usaria (Hub /api/proxy-ideal) e aplica via /proxy/set ANTES de reconectar, garantindo que a instancia sempre reconecta pelo IP correto - evita a inconsistencia de IP entre reconexao e envio que pode causar ban.",
+        "height": 220,
+        "width": 440,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -368,
+        640
+      ],
+      "typeVersion": 1,
+      "id": "39161abb-a23d-4116-9de5-d4322ce80be0",
+      "name": "Sticky Note - Fix Proxy Reconexao"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ainda-pode-auto-fix",
+              "leftValue": "={{ Number($json.auto_fix_attempts || 0) }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1056,
+        1552
+      ],
+      "id": "if-ainda-pode-auto-fix",
+      "name": "Ainda Pode Tentar Auto-Fix?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "estado-e-close",
+              "leftValue": "={{ $('Checar Status (Inicial)').item.json.instance?.state }}",
+              "rightValue": "close",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        1456
+      ],
+      "id": "if-estado-e-close",
+      "name": "Estado é Close? (Reconexao)"
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/instance/connect/{{ $('Loop Instâncias').item.json.instance_name }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -496,
+        1520
+      ],
+      "id": "http-reconectar-close",
+      "name": "Reconectar (Close)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1080,
+        1680
+      ],
+      "typeVersion": 1,
+      "id": "sticky-cap-auto-fix",
+      "name": "Sticky Note - Cap de Tentativas",
+      "parameters": {
+        "content": "FIX (2026-07-14) - Anti-ban: antes, 'Está Travada?' so olhava o estado atual - se a instancia ficasse presa em 'close'/'connecting' por horas, o monitor rodava Redis flush + proxy + reconexao forcada TODA execucao (a cada 10 min), pra sempre, sem limite. Reconectar repetidamente e' um padrao que a Meta associa a ferramenta automatizada. Agora, 'Ainda Pode Tentar Auto-Fix?' checa auto_fix_attempts (mesmo campo/limite=3 ja usado em 'Avaliar Lógica') ANTES de rodar a cadeia de reconexao - se ja esgotou as 3 tentativas, pula direto pra 'Avaliar Lógica' (que ja notifica sozinha) e para de mexer na instancia ate ela voltar sozinha (contador zera automaticamente quando isOnline).",
+        "height": 260,
+        "width": 460,
+        "color": 5
+      }
+    },
+    {
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -720,
+        1680
+      ],
+      "typeVersion": 1,
+      "id": "sticky-fix-close-vs-restart",
+      "name": "Sticky Note - Fix Close vs Restart",
+      "parameters": {
+        "content": "BUG REAL CONFIRMADO NO CODIGO-FONTE (nao suposicao): instance.controller.ts -> restartInstance() faz 'throw BadRequestException' quando state === 'close' - so funciona para 'connecting'/'open'. Ou seja, toda vez que a instancia estava REALMENTE fechada (o pior caso), 'Forçar Reconexão' (POST /instance/restart) falhava silenciosamente (onError=continueRegularOutput) e nada era corrigido - so gastava Redis flush + Hub + proxy/set a toa. Agora 'Estado é Close? (Reconexao)' decide: state=='close' -> GET /instance/connect/{instance} (o endpoint que realmente chama connectToWhatsapp nesse estado); state=='connecting' -> continua usando /instance/restart (que so funciona nesse caso mesmo).",
+        "height": 260,
+        "width": 460,
+        "color": 5
+      }
+    }
+  ],
+  "connections": {
+    "A cada 10 min": {
+      "main": [
+        [
+          {
+            "node": "Carregar do Banco",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar do Banco": {
+      "main": [
+        [
+          {
+            "node": "Loop Instâncias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Instâncias": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Checar Status (Inicial)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar Status (Inicial)": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Está Travada?": {
+      "main": [
+        [
+          {
+            "node": "Ainda Pode Tentar Auto-Fix?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avaliar Lógica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar Redis (SSH)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 5 segundos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forçar Reconexão": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 60s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-Checar Status": {
+      "main": [
+        [
+          {
+            "node": "Avaliar Lógica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avaliar Lógica": {
+      "main": [
+        [
+          {
+            "node": "Atualizar DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar DB": {
+      "main": [
+        [
+          {
+            "node": "Precisa Notificar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa Notificar?": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 30",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Msg": {
+      "main": [
+        [
+          {
+            "node": "Tem WhatsApp?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Tem E-mail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem WhatsApp?": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem E-mail?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email": {
+      "main": [
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fim Loop": {
+      "main": [
+        [
+          {
+            "node": "Loop Instâncias",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 60s": {
+      "main": [
+        [
+          {
+            "node": "Re-Checar Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 5 segundos": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy (Reconexao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Está Travada?1": {
+      "main": [
+        [
+          {
+            "node": "Montar Msg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 30": {
+      "main": [
+        [
+          {
+            "node": "Recheca Status Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recheca Status Final": {
+      "main": [
+        [
+          {
+            "node": "Está Travada?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Está Travada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy (Reconexao)": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy (Reconexao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy (Reconexao)": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (Reconexao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (Reconexao)": {
+      "main": [
+        [
+          {
+            "node": "Estado é Close? (Reconexao)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ainda Pode Tentar Auto-Fix?": {
+      "main": [
+        [
+          {
+            "node": "Limpar Redis (SSH)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avaliar Lógica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estado é Close? (Reconexao)": {
+      "main": [
+        [
+          {
+            "node": "Reconectar (Close)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Forçar Reconexão",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconectar (Close)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 60s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "A cada 10 min": [
+      {
+        "timestamp": "2026-06-12T17:05:06.048-03:00",
+        "Readable date": "June 12th 2026, 5:05:06 pm",
+        "Readable time": "5:05:06 pm",
+        "Day of week": "Friday",
+        "Year": "2026",
+        "Month": "June",
+        "Day of month": "12",
+        "Hour": "17",
+        "Minute": "05",
+        "Second": "06",
+        "Timezone": "America/Sao_Paulo (UTC-03:00)"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  }
+}

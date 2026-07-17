@@ -1,0 +1,765 @@
+{
+  "name": "GeraQRCode",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "atualizar-qr-code",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -80,
+        -48
+      ],
+      "id": "8f8b8744-1a74-49d0-b4f8-32ba56721640",
+      "name": "Atualiza qr code",
+      "webhookId": "f3988766-f52b-4be0-b0bd-254e485671a3"
+    },
+    {
+      "parameters": {
+        "content": "Subistitua o Endpoint dentro do \"Campos Dinâmicos\" para os seus !\ndeve se chamar \nhttps://n8n.athenesistemas.com.br/webhook/cce5e6b5-f99a-48a3-8b18-cf524f03c4ce/ninelabs/Instancia\nObs. substituir \"Instancia\" pelo nome da instancia em questao",
+        "height": 460,
+        "width": 860,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1024,
+        -96
+      ],
+      "typeVersion": 1,
+      "id": "78cd19b5-3483-49f1-ace5-9f1486982229",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <title>Gerador de QR Code WhatsApp</title>\n  <script src=\"https://cdn.tailwindcss.com\"></script>\n  <style>\n    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');\n    \n    * {\n      font-family: 'Inter', system-ui, sans-serif;\n    }\n    \n    .fade-in {\n      animation: fadeIn 0.4s ease-out;\n    }\n    \n    @keyframes fadeIn {\n      from { opacity: 0; transform: translateY(16px); }\n      to { opacity: 1; transform: translateY(0); }\n    }\n    \n    .spinner {\n      width: 20px;\n      height: 20px;\n      border: 2px solid #e5e7eb;\n      border-radius: 50%;\n      border-top-color: #3b82f6;\n      animation: spin 1s linear infinite;\n    }\n    \n    @keyframes spin {\n      to { transform: rotate(360deg); }\n    }\n    \n    .progress-circle {\n      transform: rotate(-90deg);\n    }\n    \n    .progress-path {\n      stroke-dasharray: 157;\n      stroke-dashoffset: 157;\n      transition: stroke-dashoffset 1s linear;\n    }\n    \n    .feature-card {\n      transition: all 0.2s ease;\n    }\n    \n    .feature-card:hover {\n      transform: translateY(-2px);\n    }\n    \n    .input-focus {\n      transition: all 0.2s ease;\n    }\n    \n    .input-focus:focus {\n      box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);\n    }\n    \n    .btn-primary {\n      transition: all 0.2s ease;\n    }\n    \n    .btn-primary:hover:not(:disabled) {\n      transform: translateY(-1px);\n      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);\n    }\n    \n    .btn-secondary {\n      transition: all 0.2s ease;\n    }\n    \n    .btn-secondary:hover {\n      background-color: #f9fafb;\n      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);\n    }\n  </style>\n</head>\n<body class=\"min-h-screen bg-gray-50\">\n  <!-- Main Content -->\n  <div class=\"min-h-screen flex items-center justify-center p-4\">\n    <div class=\"w-full max-w-md\">\n      <!-- Header -->\n      <div class=\"text-center mb-8 fade-in\">\n        <div class=\"inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-6 shadow-sm\">\n          <svg class=\"w-8 h-8 text-white\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z\"/>\n          </svg>\n        </div>\n        <h1 class=\"text-2xl font-semibold text-gray-900 mb-2\">Gerador de QR Code</h1>\n        <p class=\"text-gray-600\">Conecte sua instância WhatsApp rapidamente</p>\n      </div>\n\n      <!-- Main Card -->\n      <div class=\"bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden fade-in\">\n        <div class=\"p-6\">\n          <!-- Features Grid -->\n          <div class=\"grid grid-cols-3 gap-4 mb-8\">\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-blue-100 text-blue-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 10V3L4 14h7v7l9-11h-7z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Rápido</p>\n            </div>\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-green-100 text-green-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Seguro</p>\n            </div>\n            <div class=\"feature-card text-center p-4 bg-gray-50 rounded-xl\">\n              <div class=\"w-10 h-10 bg-purple-100 text-purple-600 rounded-lg mx-auto mb-3 flex items-center justify-center\">\n                <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                  <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z\"/>\n                </svg>\n              </div>\n              <p class=\"text-sm font-medium text-gray-700\">Simples</p>\n            </div>\n          </div>\n\n          <!-- Input Section -->\n          <div class=\"space-y-6\">\n            <div>\n              <label for=\"instanceName\" class=\"block text-sm font-medium text-gray-900 mb-3\">\n                Nome da Instância\n              </label>\n              <div class=\"relative\">\n                <input\n                  id=\"instanceName\"\n                  type=\"text\"\n                  placeholder=\"Digite o nome da sua instância\"\n                  value=\"{{ $json.instanceName || '' }}\"\n                  class=\"input-focus w-full px-4 py-4 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-0 outline-none text-gray-900 placeholder-gray-500 bg-white {{ $json.instanceName ? 'bg-gray-100 cursor-not-allowed' : '' }}\"\n                  {{ $json.instanceName ? 'readonly' : '' }}\n                />\n                <div class=\"absolute inset-y-0 right-4 flex items-center text-gray-400\">\n                  <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                    <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z\"/>\n                  </svg>\n                </div>\n              </div>\n              <p class=\"text-sm text-gray-500 mt-2\">Escolha um nome único para identificar sua conexão</p>\n            </div>\n\n            <!-- Generate Button -->\n            <button\n              id=\"generateButton\"\n              onclick=\"generateQRCode()\"\n              class=\"btn-primary w-full py-4 px-6 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl disabled:opacity-50 disabled:pointer-events-none disabled:transform-none relative overflow-hidden\"\n            >\n              <div class=\"flex items-center justify-center space-x-2\">\n                <div id=\"buttonIcon\">\n                  <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                    <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5\"/>\n                  </svg>\n                </div>\n                <span id=\"buttonText\">Gerar QR Code</span>\n              </div>\n            </button>\n          </div>\n\n          <!-- Loading State -->\n          <div id=\"loader\" class=\"hidden text-center py-12\">\n            <div class=\"inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-xl mb-4\">\n              <div class=\"spinner\"></div>\n            </div>\n            <p class=\"text-gray-900 font-medium mb-1\">Gerando QR Code</p>\n            <p class=\"text-sm text-gray-500\">Aguarde um momento...</p>\n          </div>\n\n          <!-- QR Code Display -->\n          <div id=\"qrcode\" class=\"hidden text-center py-6\">\n            <div class=\"bg-gray-50 rounded-xl p-6 border border-gray-200\">\n              <div id=\"qrImage\" class=\"mb-6\"></div>\n              \n              <!-- Instructions -->\n              <div class=\"space-y-4\">\n                <h3 class=\"text-sm font-medium text-gray-900 mb-4\">Como conectar:</h3>\n                <div class=\"space-y-3 text-left max-w-xs mx-auto\">\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">1</div>\n                    <p class=\"text-sm text-gray-600\">Abra o WhatsApp no celular</p>\n                  </div>\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">2</div>\n                    <p class=\"text-sm text-gray-600\">Acesse \"Aparelhos conectados\"</p>\n                  </div>\n                  <div class=\"flex items-start space-x-3\">\n                    <div class=\"flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-xs font-medium\">3</div>\n                    <p class=\"text-sm text-gray-600\">Escaneie este código</p>\n                  </div>\n                </div>\n              </div>\n            </div>\n          </div>\n\n          <!-- Timer -->\n          <div id=\"timer\" class=\"hidden\">\n            <div class=\"bg-amber-50 border border-amber-200 rounded-xl p-4 mt-6\">\n              <div class=\"flex items-center justify-center space-x-3\">\n                <div class=\"relative w-8 h-8\">\n                  <svg class=\"progress-circle w-8 h-8\" viewBox=\"0 0 50 50\">\n                    <circle\n                      class=\"progress-path\"\n                      stroke=\"#f59e0b\"\n                      stroke-width=\"2\"\n                      fill=\"transparent\"\n                      r=\"25\"\n                      cx=\"25\"\n                      cy=\"25\"\n                    />\n                  </svg>\n                  <div class=\"absolute inset-0 flex items-center justify-center\">\n                    <svg class=\"w-3 h-3 text-amber-600\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n                      <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n                    </svg>\n                  </div>\n                </div>\n                <div class=\"text-center\">\n                  <p id=\"timerText\" class=\"text-sm font-medium text-amber-800\"></p>\n                  <p class=\"text-xs text-amber-600\">Tempo restante</p>\n                </div>\n              </div>\n            </div>\n          </div>\n        </div>\n      </div>\n\n      <!-- Help Button -->\n      <div class=\"mt-6 fade-in\">\n        <button\n          id=\"helpButton\"\n          onclick=\"window.open('{{ $json.ajuda }}', '_blank')\"\n          class=\"btn-secondary w-full py-4 px-6 bg-white text-gray-700 font-medium rounded-xl border border-gray-300 hover:bg-gray-50\"\n        >\n          <div class=\"flex items-center justify-center space-x-3\">\n            <svg class=\"w-5 h-5 text-gray-500\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n              <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"/>\n            </svg>\n            <span>Precisa de ajuda?</span>\n          </div>\n        </button>\n      </div>\n\n      <!-- Footer -->\n      <div class=\"text-center mt-8 fade-in\">\n        <div class=\"flex items-center justify-center space-x-2 text-sm text-gray-500\">\n          <svg class=\"w-4 h-4 text-green-500\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"/>\n          </svg>\n          <span>Conexão segura</span>\n          <span>•</span>\n          <span class=\"font-medium text-gray-600\">WhatsApp Business API</span>\n        </div>\n      </div>\n    </div>\n  </div>\n\n  <script>\n    let timerInterval;\n    let timeLeft = 30;\n\n    async function generateQRCode() {\n      const input = document.getElementById('instanceName');\n      const name = input.value.trim();\n      \n      if (!name) {\n        input.focus();\n        input.classList.add('border-red-400', 'ring-4', 'ring-red-100');\n        setTimeout(() => {\n          input.classList.remove('border-red-400', 'ring-4', 'ring-red-100');\n        }, 2500);\n        return;\n      }\n\n      await fetchQRCode(name);\n    }\n\n    async function fetchQRCode(name) {\n      const loader = document.getElementById('loader');\n      const button = document.getElementById('generateButton');\n      const buttonText = document.getElementById('buttonText');\n      const buttonIcon = document.getElementById('buttonIcon');\n      const qrSection = document.getElementById('qrcode');\n      const qrImageContainer = document.getElementById('qrImage');\n      const timerSection = document.getElementById('timer');\n\n      // Show loading state\n      qrSection.classList.add('hidden');\n      timerSection.classList.add('hidden');\n      loader.classList.remove('hidden');\n      button.disabled = true;\n      buttonText.textContent = 'Gerando...';\n      buttonIcon.innerHTML = '<div class=\"spinner\"></div>';\n\n      try {\n        const endpoint = '{{ $json.endpoint }}'; \n\n        const res = await fetch(endpoint, {\n          method: 'POST',\n          headers: { 'Content-Type': 'application/json' },\n          body: JSON.stringify({ instance: name })\n        });\n\n        if (!res.ok) {\n          let errorMsg = `Erro HTTP: ${res.status}`;\n          try {\n            const errorData = await res.json();\n            if (errorData && errorData.message) {\n              errorMsg = errorData.message;\n            }\n          } catch (e) {\n            errorMsg = res.statusText || errorMsg;\n          }\n          throw new Error(errorMsg);\n        }\n        \n        const blob = await res.blob();\n        if (blob.type.startsWith('image/')) {\n          const url = URL.createObjectURL(blob);\n          qrImageContainer.innerHTML = `<img src=\"${url}\" alt=\"QR Code WhatsApp\" class=\"rounded-xl max-w-64 mx-auto\" />`;\n        } else {\n          const ct = res.headers.get('content-type') || '';\n          const text = await blob.text();\n          try {\n            const payload = JSON.parse(text);\n            const state = (payload?.data?.instance?.state || payload?.status || '').toLowerCase();\n            if (['connected','ready','qrreadsuccess','authenticated','open'].includes(state)) {\n              showConnected(data?.message || 'Conectado com sucesso!');\n              return;\n            }\n          } catch (_) {\n            // não era JSON; segue para erro\n          }\n          if(!text){ showConnected('Já está conectado'); return;} throw new Error(text || 'Resposta inesperada do servidor.');\n        }\n\n\n        // Show QR code\n        loader.classList.add('hidden');\n        qrSection.classList.remove('hidden');\n        timerSection.classList.remove('hidden');\n        resetTimer();\n\n        // depois de mostrar o QR e chamar resetTimer();\n        pollUntilConnected(name);\n        \n        async function pollUntilConnected(name) {\n          if (timeLeft <= 0) return;\n        \n          const endpoint = '{{ $json.endpoint }}';\n          try {\n            const res = await fetch(endpoint, {\n              method: 'POST',\n              headers: { 'Content-Type': 'application/json' },\n              body: JSON.stringify({ instance: name })\n            });\n            const ct = res.headers.get('content-type') || '';\n            if (ct.includes('application/json')) {\n              const data = await res.json();\n              const state = (data?.data?.instance?.state || data?.status || '').toLowerCase();\n              if (['connected','ready','qrreadsuccess','authenticated','open'].includes(state)) {\n                showConnected(data?.message || 'Conectado com sucesso!');\n                return;\n              }\n            }\n          } catch (e) {\n            // silencioso; tentamos de novo\n          }\n          setTimeout(() => pollUntilConnected(name), 1500);\n        }\n\n        \n      } catch (error) {\n        console.error('Erro ao gerar QR Code:', error);\n        loader.classList.add('hidden');\n        qrSection.classList.add('hidden');\n        timerSection.classList.add('hidden');\n        showError(error.message || 'Erro ao gerar QR Code. Tente novamente.');\n      } finally {\n        button.disabled = false;\n        buttonText.textContent = 'Gerar QR Code';\n        buttonIcon.innerHTML = `\n          <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 0h-4m4 0l-5-5\"/>\n          </svg>\n        `;\n      }\n    }\n\n    function resetTimer() {\n      clearInterval(timerInterval);\n      timeLeft = 30;\n      updateTimerDisplay();\n      timerInterval = setInterval(updateTimerDisplay, 1000);\n    }\n\n    function updateTimerDisplay() {\n      const timerTextEl = document.getElementById('timerText');\n      const progressPath = document.querySelector('.progress-path');\n      const timerSection = document.getElementById('timer');\n      const qrSection = document.getElementById('qrcode');\n      \n      if (timeLeft <= 0) {\n        clearInterval(timerInterval);\n        timerTextEl.textContent = 'Código expirado!';\n        progressPath.style.strokeDashoffset = 157;\n        setTimeout(() => {\n          timerSection.classList.add('hidden');\n          qrSection.classList.add('hidden');\n          showError('QR Code expirado. Gere um novo código.');\n        }, 1000);\n        return;\n      }\n      \n      timerTextEl.textContent = `${timeLeft}s`;\n      \n      const circumference = 2 * Math.PI * 25;\n      const offset = circumference - (timeLeft / 30) * circumference;\n      progressPath.style.strokeDashoffset = offset;\n      \n      timeLeft--;\n    }\n\n    function showConnected(message='Conectado com sucesso!') {\n      clearInterval(timerInterval);\n      const qrSectionElem = document.getElementById('qrcode');\n      const timerElem = document.getElementById('timer');\n      const loader = document.getElementById('loader');\n      const button = document.getElementById('generateButton');\n      const buttonText = document.getElementById('buttonText');\n      const buttonIcon = document.getElementById('buttonIcon');\n      \n      if (qrSectionElem) qrSectionElem.classList.add('hidden');\n      if (timerElem) timerElem.classList.add('hidden');\n      if (loader) loader.classList.add('hidden');\n\n      // reset primary button to idle state\n      if (button) button.disabled = false;\n      if (buttonText) buttonText.textContent = 'Gerar QR Code';\n      if (buttonIcon) buttonIcon.innerHTML = `\n          <svg class=\"w-5 h-5\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\">\n            <path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M4 4v4m0-4h4M4 20v-4m0 4h4M20 4v4m0-4h-4M20 20v-4m0 4h-4\"/>\n          </svg>`;\n\n      const card = document.querySelector('.bg-white.rounded-2xl');\n      const ok = document.createElement('div');\n      ok.className = 'mt-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 text-center';\n      ok.textContent = message || 'Conectado com sucesso!';\n      card.appendChild(ok);\n\n      // after a brief delay, scroll to top and auto-hide the toast\n      window.scrollTo({top:0, behavior:'smooth'});\n      setTimeout(()=> ok.remove(), 4000);\n    }\n    function showError(message) {\n      const errorDiv = document.createElement('div');\n      errorDiv.className = 'fixed top-6 right-6 bg-red-500 text-white px-6 py-4 rounded-xl shadow-lg z-50 text-sm font-medium max-w-sm';\n      errorDiv.textContent = message;\n      document.body.appendChild(errorDiv);\n      \n      setTimeout(() => {\n        errorDiv.style.animation = 'fadeIn 0.3s ease-out reverse';\n        setTimeout(() => errorDiv.remove(), 300);\n      }, 4000);\n    }\n\n    // Event listeners\n    document.getElementById('instanceName').addEventListener('keypress', function(e) {\n      if (e.key === 'Enter') {\n        e.preventDefault();\n        generateQRCode();\n      }\n    });\n\n    window.addEventListener('load', () => {\n      document.getElementById('instanceName').focus();\n    });\n  </script>\n</body>\n</html>"
+      },
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [
+        -576,
+        96
+      ],
+      "id": "aea20aee-5ac7-46e1-91da-098e8c834b10",
+      "name": "somente buscar a instancia já criada"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a2a68ca7-0e4c-458f-ae04-b263cc19b14d",
+              "name": "ajuda",
+              "value": "https://za9.com.br",
+              "type": "string"
+            },
+            {
+              "id": "6ec85942-3ffc-41dd-a9a4-60a4011351f9",
+              "name": "endpoint",
+              "value": "https://n8n.athenesistemas.com.br/webhook/atualizar-qr-code",
+              "type": "string"
+            },
+            {
+              "id": "083e09ef-52a3-4dfc-b137-d5edf5f479cc",
+              "name": "instanceName",
+              "value": "={{ $json.params.instanceName || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -768,
+        96
+      ],
+      "id": "d56a4c1b-50c2-484d-9e4e-cfa5a5d9d36d",
+      "name": "Campos Dinâmicos"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7997d699-2380-48aa-8dc3-b1eac974e16e",
+              "name": "base64",
+              "value": "={{ $json.data?.base64 ? $json.data.base64.split(',').pop() : '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        696,
+        -48
+      ],
+      "id": "5f19db73-48ce-4a43-ab2b-dd365ea52e08",
+      "name": "Limpa o código base64"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "base64",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1096,
+        -64
+      ],
+      "id": "fe7fc79e-e730-4363-986d-62f959065b5f",
+      "name": "Converte para base64"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "status": "connected",
+          "message": "Já está conectado",
+          "data": {
+            "instance": {
+              "instanceName": "={{$json.body?.instance || $json.instance || ''}}",
+              "state": "connected"
+            }
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1096,
+        128
+      ],
+      "id": "7760b1e5-bc9f-43ca-9459-d4a3e2208b09",
+      "name": "gera mensagem de conectado!",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -368,
+        96
+      ],
+      "id": "99ace159-99c9-4aa5-a11b-59eda4887ea4",
+      "name": "Gera Html Dinâmico"
+    },
+    {
+      "parameters": {
+        "operation": "instance-connect",
+        "instanceName": "={{ $json.instanceName.replace('\\n','').replace('=','') }}"
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        488,
+        -48
+      ],
+      "id": "b411f9bf-e406-4160-8ce4-60ecbd75ab1d",
+      "name": "Conexão EVO",
+      "credentials": {
+        "evolutionApi": {
+          "id": "yzHzre8hGKpvHcKY",
+          "name": "Evolution account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1336,
+        -64
+      ],
+      "id": "10a00d82-53b4-4065-b8ae-3e946a65f009",
+      "name": "gerar dinamicamente qrcode",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ ($json.base64 || $json.data?.base64 || '').toString() }}",
+              "operation": {
+                "operation": "string",
+                "operator": {
+                  "type": "notEqual",
+                  "value1": ""
+                }
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": false,
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "7a90f59f-0e87-4b0c-8349-164cdcc9e74f",
+      "name": "tem base64?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        888,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/instance/connectionState/{{ encodeURIComponent($json.body?.instance || $json.query?.instance || $json.instance?.instanceName || $json.instanceName || '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "a11096b1-f19e-4ca1-ac53-08f62af61f24",
+      "name": "Estado via HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -64,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "content": "Gerador de QrCode",
+        "height": 604,
+        "width": 1440,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -112,
+        -96
+      ],
+      "typeVersion": 1,
+      "id": "96ee5cf9-a5bd-419e-a716-38008ae8cfa7",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e96217d4-8109-4123-8748-cc471b3d91fa",
+              "leftValue": "={{ (   $json.data?.instance?.state ??   $json.instance?.state ??   $json.data?.state ??   $json.state ??   '' ).toString().toLowerCase() }}",
+              "rightValue": "^(connected|ready|qrreadsuccess|authenticated|open)$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        144,
+        144
+      ],
+      "id": "aa49e3f4-32d9-4546-83e8-79e92b68dbf2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f7ea70c9-e31c-43e2-8837-fa776f0b7a26",
+              "name": "instanceName",
+              "value": "={{ (\n  $json.body?.instance ||\n  $json.query?.instance ||\n  $json.instance?.instanceName ||\n  $json.instanceName ||\n  $json.data?.instance?.instanceName ||\n  ''\n).toString().trim().replaceAll(/^[^a-zA-Z0-9_-]+|[^a-zA-Z0-9_-]+$/g,'').replaceAll('\\n','').replaceAll('=','') }}\n",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        -48
+      ],
+      "id": "fc967b4d-db98-47fc-b85f-807edddb00a1",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "path": "ninelabs/:instanceName",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        16
+      ],
+      "id": "6e7ad29d-a478-49b3-b20c-73fecfccfd4c",
+      "name": "Inicializa a pagina Com Instance Fixa",
+      "webhookId": "cce5e6b5-f99a-48a3-8b18-cf524f03c4ce"
+    },
+    {
+      "parameters": {
+        "path": "ninelabs",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -976,
+        176
+      ],
+      "id": "d31fb22e-923a-4547-9acd-207450c1b54b",
+      "name": "Inicializa a pagina",
+      "webhookId": "cce5e6b5-f99a-48a3-8b18-cf524f03c4ce"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst dataObj = { limite_envios: 50, instance: $('Edit Fields').item.json.instanceName };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy (Pareamento)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        408,
+        -48
+      ],
+      "id": "5c04ae66-29c4-4958-a48a-6d936e62bdef"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy (Pareamento)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        448,
+        -48
+      ],
+      "id": "f60a4fd2-e4cd-4b1c-b99c-3c0383b83765",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evo.athenesistemas.com.br/proxy/set/{{ $('Edit Fields').item.json.instanceName }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Hub Proxy (Pareamento)').item.json.proxy?.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy (Pareamento)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        468,
+        -48
+      ],
+      "id": "9fa77a5a-8a2f-467b-9216-a5f81ed67979",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "FIX (2026-07-14): antes desse ajuste, o pareamento (QR code) chamava 'instance-connect' direto, sem nunca setar proxy - a instancia conectava usando o IP do proprio servidor. Como o Despachante (envio) SEMPRE seta um proxy antes de mandar mensagem, a instancia ficava migrando de IP de origem entre 'sem proxy' (conexao/pareamento) e 'com proxy' (envio), forcando reconexao completa do WebSocket a cada troca - padrao que o WhatsApp usa pra flagar conta como suspeita. Agora o mesmo proxy usado nos envios (via Hub /api/proxy-ideal, mesma logica do Despachante) e aplicado ANTES de conectar/gerar o QR.\n\nATUALIZACAO (checagem antes de setar): como o front-end faz polling a cada 1.5s enquanto o QR nao e escaneado, sem essa checagem o fluxo chamaria o Hub + POST /proxy/set em TODA chamada de polling (20+ vezes numa unica sessao). Adicionamos 'Buscar Proxy Atual (Pareamento)' -> GET /proxy/find/{instance} (endpoint real, confirmado direto no codigo-fonte do evolution-api: proxy.router.ts + proxy.controller.ts + prisma model Proxy) ANTES da cadeia HMAC/Hub/Set. Se ja existe um proxy enabled=true com host preenchido, pula direto pra 'Conexão EVO'; so roda o Hub+Set Proxy quando realmente falta ou esta desabilitado. Mesma otimizacao ja aplicada no GeraQRCode-GO (endpoint /instance/all + campo 'proxy').\n\nObs.: /proxy/find exige os mesmos guards de /proxy/set (instancia precisa existir - instanceExistsGuard - mas NAO precisa estar conectada/pareada ainda), entao funciona no mesmo ponto do fluxo onde 'Set Proxy (Pareamento)' ja era chamado.",
+        "height": 260,
+        "width": 460,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        200,
+        -280
+      ],
+      "typeVersion": 1,
+      "id": "a9935b0d-9c34-4be4-b1c5-4ef48bc27593",
+      "name": "Sticky Note - Fix Proxy Pareamento",
+      "height": 380,
+      "width": 520
+    },
+    {
+      "parameters": {
+        "url": "=https://evo.athenesistemas.com.br/proxy/find/{{ $('Edit Fields').item.json.instanceName }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        168,
+        -48
+      ],
+      "id": "buscar-proxy-atual-pareamento",
+      "name": "Buscar Proxy Atual (Pareamento)",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "proxy-ja-ativo-cond",
+              "leftValue": "={{ $json?.enabled === true && !!$json?.host }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        188,
+        -48
+      ],
+      "id": "proxy-ja-ativo-pareamento",
+      "name": "Proxy Já Ativo? (Pareamento)"
+    }
+  ],
+  "pinData": {
+    "Atualiza qr code": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.athenesistemas.com.br",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+            "content-length": "21",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "content-type": "application/json",
+            "origin": "null",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Google Chrome\";v=\"141\", \"Not?A_Brand\";v=\"8\", \"Chromium\";v=\"141\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "179.162.214.206",
+            "x-forwarded-host": "n8n.athenesistemas.com.br",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "e83989d5f59e",
+            "x-real-ip": "179.162.214.206"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "instance": "loja01"
+          },
+          "webhookUrl": "https://n8n.athenesistemas.com.br/webhook/atualizar-qr-code",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "somente buscar a instancia já criada": {
+      "main": [
+        [
+          {
+            "node": "Gera Html Dinâmico",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Campos Dinâmicos": {
+      "main": [
+        [
+          {
+            "node": "somente buscar a instancia já criada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpa o código base64": {
+      "main": [
+        [
+          {
+            "node": "tem base64?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converte para base64": {
+      "main": [
+        [
+          {
+            "node": "gerar dinamicamente qrcode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conexão EVO": {
+      "main": [
+        [
+          {
+            "node": "Limpa o código base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualiza qr code": {
+      "main": [
+        [
+          {
+            "node": "Estado via HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tem base64?": {
+      "main": [
+        [
+          {
+            "node": "Converte para base64",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "gera mensagem de conectado!",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estado via HTTP": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "gera mensagem de conectado!",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Buscar Proxy Atual (Pareamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inicializa a pagina Com Instance Fixa": {
+      "main": [
+        [
+          {
+            "node": "Campos Dinâmicos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inicializa a pagina": {
+      "main": [
+        [
+          {
+            "node": "Campos Dinâmicos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy (Pareamento)": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy (Pareamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy (Pareamento)": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy (Pareamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy (Pareamento)": {
+      "main": [
+        [
+          {
+            "node": "Conexão EVO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Proxy Atual (Pareamento)": {
+      "main": [
+        [
+          {
+            "node": "Proxy Já Ativo? (Pareamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proxy Já Ativo? (Pareamento)": {
+      "main": [
+        [
+          {
+            "node": "Conexão EVO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Proxy (Pareamento)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "54d8d33e-9084-4761-bec7-91ba9f3ad0de",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  },
+  "id": "0szUCSZfzePPR9T6",
+  "tags": []
+}
