@@ -7,3 +7,9 @@ coverage.*
 .idea/
 .vscode/
 .DS_Store
+evolution-go
+server
+
+# Utilitarios temporarios (Athene)
+savecontact.patch
+regen-swagger.sh
