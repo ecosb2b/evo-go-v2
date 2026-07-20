@@ -786,6 +786,56 @@ definitions:
       quoted:
         $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.QuotedStruct'
     type: object
+  github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.ProductStruct:
+    properties:
+      body:
+        type: string
+      businessOwnerJid:
+        description: JID do dono do catálogo. Se vazio, usa o JID da própria instância.
+        type: string
+      currency:
+        example: BRL
+        type: string
+      delay:
+        type: integer
+      description:
+        type: string
+      footer:
+        type: string
+      formatJid:
+        type: boolean
+      id:
+        type: string
+      imageBase64:
+        description: 'Imagem do produto: base64 ou URL externa (será baixada e reenviada).'
+        type: string
+      imageUrl:
+        type: string
+      mentionAll:
+        type: boolean
+      mentionedJid:
+        items:
+          type: string
+        type: array
+      number:
+        type: string
+      price:
+        description: 'Preço em miliunidades da moeda: R$ 10,00 => 10000.'
+        type: integer
+      productId:
+        description: |-
+          Dados do produto (aparecem no card). O ProductId deve ser o ID do produto
+          no seu catálogo — pegue no app oficial / Commerce Manager.
+        type: string
+      quoted:
+        $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.QuotedStruct'
+      retailerId:
+        type: string
+      title:
+        type: string
+      url:
+        type: string
+    type: object
   github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.QuotedStruct:
     properties:
       messageId:
@@ -909,6 +959,72 @@ definitions:
         $ref: '#/definitions/types.PrivacySetting'
       status:
         $ref: '#/definitions/types.PrivacySetting'
+    type: object
+  github_com_evolution-foundation_evolution-go_pkg_user_service.ProductCreateStruct:
+    properties:
+      currency:
+        example: BRL
+        type: string
+      description:
+        type: string
+      imageBase64:
+        description: 'Forneça UMA das opções de imagem:'
+        type: string
+      imageUrl:
+        description: URL externa (será baixada) ou uma URL .whatsapp.net (reusada)
+        type: string
+      isHidden:
+        type: boolean
+      name:
+        example: Camiseta Athene
+        type: string
+      originCountryCode:
+        description: |-
+          País de origem (ISO 3166-1 alpha-2, ex.: "BR"). O WhatsApp passou a exigir
+          esse campo no cadastro de produto. Se vazio, envia COUNTRY_ORIGIN_EXEMPT
+          (comportamento antigo do Baileys), que tende a ser rejeitado.
+        example: BR
+        type: string
+      price:
+        description: 'Preço em miliunidades da moeda: R$ 10,00 => 10000. (padrão do
+          WhatsApp)'
+        example: 10000
+        type: integer
+      retailerId:
+        type: string
+    type: object
+  github_com_evolution-foundation_evolution-go_pkg_user_service.ProductDeleteStruct:
+    properties:
+      productIds:
+        items:
+          type: string
+        type: array
+    type: object
+  github_com_evolution-foundation_evolution-go_pkg_user_service.ProductUpdateStruct:
+    properties:
+      currency:
+        type: string
+      description:
+        type: string
+      imageBase64:
+        type: string
+      imageUrl:
+        type: string
+      isHidden:
+        type: boolean
+      name:
+        type: string
+      originCountryCode:
+        description: 'País de origem (ISO 3166-1 alpha-2, ex.: "BR").'
+        example: BR
+        type: string
+      price:
+        type: integer
+      productId:
+        example: "1234567890"
+        type: string
+      retailerId:
+        type: string
     type: object
   github_com_evolution-foundation_evolution-go_pkg_user_service.SaveContactStruct:
     properties:
@@ -7279,6 +7395,118 @@ paths:
       summary: Reject call
       tags:
       - Call
+  /catalog/product:
+    delete:
+      consumes:
+      - application/json
+      description: Remove um ou mais produtos do catálogo por ID.
+      parameters:
+      - description: Product IDs
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_user_service.ProductDeleteStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Error on validation
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Delete catalog products
+      tags:
+      - Catalog
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Cria um produto no catálogo do WhatsApp Business da instância.
+        Forneça a imagem via `imageBase64` (recomendado) ou `imageUrl`.
+        `price` é em miliunidades da moeda (R$ 10,00 = 10000).
+      parameters:
+      - description: Product data
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_user_service.ProductCreateStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Error on validation
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Create a catalog product
+      tags:
+      - Catalog
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Edita um produto existente no catálogo. Atualização parcial:
+        só os campos preenchidos mudam. Envie imagem só para trocá-la.
+      parameters:
+      - description: Product data
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_user_service.ProductUpdateStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Error on validation
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Update a catalog product
+      tags:
+      - Catalog
+  /catalog/products:
+    get:
+      consumes:
+      - application/json
+      description: Lista os produtos do catálogo do WhatsApp Business da instância.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Get the catalog
+      tags:
+      - Catalog
   /chat/archive:
     post:
       consumes:
@@ -9335,6 +9563,40 @@ paths:
       summary: Send a poll message
       tags:
       - Send Message
+  /send/product:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Envia o card de um produto do catálogo (foto, título, preço e botão)
+        para um contato. Os produtos são criados no app oficial / Meta Commerce
+        Manager; aqui você informa o `productId` e os dados exibidos no card.
+        `price` é em miliunidades da moeda (R$ 10,00 = 10000).
+      parameters:
+      - description: Product message data
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.ProductStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Error on validation
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Send a catalog product card
+      tags:
+      - Send
   /send/status/media:
     post:
       consumes:

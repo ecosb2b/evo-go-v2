@@ -75,7 +75,17 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 		c.File("manager/dist/index.html")
 	})
 
+	// [Athene] Dashboard customizado (self-hosted, mesmo dominio, sem CORS).
+	// Serve uma pagina estatica que consome /instance/all, /server/ok e
+	// /instance/logs/:id usando a Global API Key informada no proprio navegador.
+	eng.GET("/dashboard", func(c *gin.Context) {
+		c.File("manager/dist/dashboard.html")
+	})
+
 	eng.GET("/server/ok", r.serverHandler.ServerOk)
+
+	// [Athene] Métricas de sistema + mensagens para o dashboard. Auth: Global API Key.
+	eng.GET("/server/stats", r.authMiddleware.AuthAdmin, r.serverHandler.Stats)
 
 	routes := eng.Group("/instance")
 	{
@@ -122,6 +132,8 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/button", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendButton)
 			routes.POST("/list", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendList)
 			routes.POST("/carousel", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendCarousel)
+			// [Athene] Card de produto do catálogo (waE2E.ProductMessage)
+			routes.POST("/product", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendProduct)
 			routes.POST("/status/text", r.sendHandler.SendStatusText)
 			routes.POST("/status/media", r.sendHandler.SendStatusMedia)
 		}
@@ -143,6 +155,17 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/profilePicture", r.userHandler.SetProfilePicture)
 			routes.POST("/profileName", r.userHandler.SetProfileName)
 			routes.POST("/profileStatus", r.userHandler.SetProfileStatus)
+		}
+	}
+	// [Athene] Catálogo de produtos (WhatsApp Business). Auth por token da instância.
+	routes = eng.Group("/catalog")
+	{
+		routes.Use(r.authMiddleware.Auth)
+		{
+			routes.GET("/products", r.userHandler.GetCatalog)
+			routes.POST("/product", r.userHandler.CreateProduct)
+			routes.PUT("/product", r.userHandler.UpdateProduct)
+			routes.DELETE("/product", r.userHandler.DeleteProducts)
 		}
 	}
 	routes = eng.Group("/message")

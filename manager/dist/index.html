@@ -10,5 +10,64 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- [Athene] Injeta o dashboard customizado dentro da aba Dashboard do manager,
+         substituindo o placeholder "Dashboard content will be implemented here...".
+         Como so temos o build do front, fazemos via DOM (sem tocar no JS minificado). -->
+    <script>
+      (function () {
+        var PHRASE = "Dashboard content will be implemented here";
+        function findPlaceholder() {
+          var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+          var n;
+          while ((n = w.nextNode())) {
+            if (n.nodeValue && n.nodeValue.indexOf(PHRASE) > -1) return n.parentElement;
+          }
+          return null;
+        }
+        // Ajusta a altura do iframe ao conteudo (same-origin), evitando scroll
+        // interno e espaco vazio acima/abaixo.
+        function sizeFrame(frame) {
+          try {
+            var h = frame.contentWindow.document.documentElement.scrollHeight;
+            if (h && Math.abs((parseInt(frame.style.height, 10) || 0) - h) > 4) {
+              frame.style.height = h + "px";
+            }
+          } catch (e) {}
+        }
+        // Acha o H1 "Dashboard" (o titulo da pagina; o item do menu lateral e SPAN).
+        function findTitle() {
+          var hs = document.querySelectorAll("h1");
+          for (var i = 0; i < hs.length; i++) {
+            if (hs[i].textContent.trim() === "Dashboard") return hs[i];
+          }
+          return null;
+        }
+        function inject() {
+          var title = findTitle();
+          if (!title) return; // nao esta na aba Dashboard
+          var container = title.parentElement; // DIV.p-6, dentro do MAIN rolavel
+          if (!container) return;
+          var frame = document.getElementById("egogo-dash-frame");
+          if (frame && frame.isConnected) {
+            if (frame.parentElement === container) { sizeFrame(frame); return; }
+            frame.remove(); // estava no lugar errado (ex.: solto no body) -> reinjeta
+          }
+          var ph = findPlaceholder();
+          if (ph) ph.remove();
+          frame = document.createElement("iframe");
+          frame.id = "egogo-dash-frame";
+          frame.src = "/dashboard?embed=1";
+          frame.setAttribute("scrolling", "no");
+          frame.style.cssText =
+            "width:100%;height:640px;border:0;border-radius:12px;display:block;overflow:hidden;margin-top:8px";
+          frame.addEventListener("load", function () { sizeFrame(frame); });
+          container.appendChild(frame); // logo abaixo do titulo, no lugar certo
+        }
+        var obs = new MutationObserver(inject);
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        document.addEventListener("DOMContentLoaded", inject);
+        setInterval(inject, 800); // fallback p/ navegacao client-side do SPA
+      })();
+    </script>
   </body>
 </html>

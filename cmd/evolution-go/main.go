@@ -238,7 +238,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		label_handler.NewLabelHandler(labelService),
 		newsletter_handler.NewNewsletterHandler(newsletterService),
 		pollHandler,
-		server_handler.NewServerHandler(),
+		server_handler.NewServerHandler(messageRepository),
 	).AssignRoutes(r)
 
 	if config.ConnectOnStartup {
