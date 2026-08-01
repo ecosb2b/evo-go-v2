@@ -3060,6 +3060,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/send/event": {
+            "post": {
+                "description": "Cria e envia um Evento/agenda do WhatsApp. ` + "`" + `startTime` + "`" + `/` + "`" + `endTime` + "`" + ` aceitam\nISO 8601 (RFC3339) com timezone ou epoch em segundos. Normalmente enviado\na um JID de grupo, ex.: 1203...@g.us.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Send Message"
+                ],
+                "summary": "Send a WhatsApp event message",
+                "parameters": [
+                    {
+                        "description": "Event data",
+                        "name": "message",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventStruct"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "success",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    },
+                    "400": {
+                        "description": "Error on validation",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/gin.H"
+                        }
+                    }
+                }
+            }
+        },
         "/send/link": {
             "post": {
                 "description": "Send a link message",
@@ -5087,6 +5133,97 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventLocationStruct": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "example": "Av. Principal, 1000"
+                },
+                "latitude": {
+                    "type": "number",
+                    "example": -16.6869
+                },
+                "longitude": {
+                    "type": "number",
+                    "example": -49.2648
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Sede Grupo Mirandas"
+                }
+            }
+        },
+        "github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventStruct": {
+            "type": "object",
+            "properties": {
+                "delay": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "endTime": {
+                    "type": "string"
+                },
+                "extraGuestsAllowed": {
+                    "type": "boolean"
+                },
+                "formatJid": {
+                    "type": "boolean"
+                },
+                "hasReminder": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "isCanceled": {
+                    "type": "boolean"
+                },
+                "isScheduleCall": {
+                    "type": "boolean"
+                },
+                "joinLink": {
+                    "description": "Link de chamada (apenas call.whatsapp.com; links externos vão em description).",
+                    "type": "string"
+                },
+                "location": {
+                    "$ref": "#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventLocationStruct"
+                },
+                "mentionAll": {
+                    "type": "boolean"
+                },
+                "mentionedJid": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Reuniao de vendas"
+                },
+                "number": {
+                    "type": "string",
+                    "example": "120363000000000000@g.us"
+                },
+                "quoted": {
+                    "$ref": "#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.QuotedStruct"
+                },
+                "reminderOffsetSec": {
+                    "type": "integer"
+                },
+                "startTime": {
+                    "type": "string",
+                    "example": "2026-06-25T20:00:00-03:00"
+                },
+                "text": {
+                    "description": "Texto opcional enviado ANTES do card do evento (funciona como legenda; o\nevento não tem campo de legenda). Respeita mentionAll/mentionedJid/delay.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.LinkStruct": {
             "type": "object",
             "properties": {
@@ -5857,6 +5994,9 @@ const docTemplate = `{
                 },
                 "isGroup": {
                     "description": "Whether the chat is a group chat or broadcast list.",
+                    "type": "boolean"
+                },
+                "isNewsletterStatus": {
                     "type": "boolean"
                 },
                 "mediaType": {
@@ -7055,7 +7195,8 @@ const docTemplate = `{
                 47,
                 54,
                 55,
-                56
+                56,
+                57
             ],
             "x-enum-varnames": [
                 "BotMetricsEntryPoint_UNDEFINED_ENTRY_POINT",
@@ -7105,7 +7246,8 @@ const docTemplate = `{
                 "BotMetricsEntryPoint_WEB_NAVIGATION_BAR",
                 "BotMetricsEntryPoint_GROUP_MEMBER",
                 "BotMetricsEntryPoint_CHATLIST_SEARCH",
-                "BotMetricsEntryPoint_NEW_CHAT_LIST"
+                "BotMetricsEntryPoint_NEW_CHAT_LIST",
+                "BotMetricsEntryPoint_CONTACTS_TAB"
             ]
         },
         "waAICommon.BotMetricsMetadata": {
@@ -8892,6 +9034,9 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                },
+                "callReason": {
+                    "type": "string"
                 },
                 "contextInfo": {
                     "$ref": "#/definitions/waE2E.ContextInfo"
@@ -13604,6 +13749,9 @@ const docTemplate = `{
                 "requestWelcomeMessageMetadata": {
                     "$ref": "#/definitions/waE2E.RequestWelcomeMessageMetadata"
                 },
+                "syncRequestMutationRetry": {
+                    "$ref": "#/definitions/waE2E.SyncRequestMutationRetry"
+                },
                 "timestampMS": {
                     "type": "integer"
                 },
@@ -13646,7 +13794,8 @@ const docTemplate = `{
                 34,
                 35,
                 36,
-                37
+                37,
+                38
             ],
             "x-enum-varnames": [
                 "ProtocolMessage_REVOKE",
@@ -13680,7 +13829,8 @@ const docTemplate = `{
                 "ProtocolMessage_CHAT_THEME_SETTING",
                 "ProtocolMessage_AI_METADATA_OPERATION",
                 "ProtocolMessage_MARK_AS_VERIFIED_ACTION",
-                "ProtocolMessage_COEX_STATE_SYNC"
+                "ProtocolMessage_COEX_STATE_SYNC",
+                "ProtocolMessage_SYNC_REQUEST_MUTATION_RETRY"
             ]
         },
         "waE2E.QuestionResponseMessage": {
@@ -14304,6 +14454,31 @@ const docTemplate = `{
                 },
                 "rmrSource": {
                     "type": "string"
+                }
+            }
+        },
+        "waE2E.SyncRequestMutationRetry": {
+            "type": "object",
+            "properties": {
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/waE2E.SyncRequestMutationRetry_Collection"
+                    }
+                },
+                "count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "waE2E.SyncRequestMutationRetry_Collection": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "storedSyncdVersion": {
+                    "type": "integer"
                 }
             }
         },

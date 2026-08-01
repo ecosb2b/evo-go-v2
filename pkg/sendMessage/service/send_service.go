@@ -44,6 +44,7 @@ type SendService interface {
 	SendPoll(data *PollStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendSticker(data *StickerStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendLocation(data *LocationStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
+	SendEvent(data *EventStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendContact(data *ContactStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendButton(data *ButtonStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendList(data *ListStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
@@ -382,7 +383,9 @@ type MessageSendStruct struct {
 }
 
 func (s *sendService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
+	whatsmeow_service.ClientMapsMu.RLock()
 	client := s.clientPointer[instanceId]
+	whatsmeow_service.ClientMapsMu.RUnlock()
 	s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -396,7 +399,9 @@ func (s *sendService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
+		whatsmeow_service.ClientMapsMu.RLock()
 		client = s.clientPointer[instanceId]
+		whatsmeow_service.ClientMapsMu.RUnlock()
 		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -2340,9 +2345,17 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 
 	s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Recipient validated: %s (Server: %s)", instance.Id, recipient.String(), recipient.Server)
 
+	// [Athene/PR#127] Busca o client uma vez para todo o envio: o read do map é
+	// guardado, mas um envio roda contra um único client, então evitamos re-ler o
+	// map (e potencialmente correr com um reconnect concorrente no meio do envio)
+	// em cada uma das chamadas abaixo.
+	whatsmeow_service.ClientMapsMu.RLock()
+	sendMessageClient := s.clientPointer[instance.Id]
+	whatsmeow_service.ClientMapsMu.RUnlock()
+
 	var message string
 	if data.Id == "" {
-		message = s.clientPointer[instance.Id].GenerateMessageID()
+		message = sendMessageClient.GenerateMessageID()
 	} else {
 		message = data.Id
 	}
@@ -2353,14 +2366,14 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 			media = "audio"
 		}
 
-		err := s.clientPointer[instance.Id].SendChatPresence(context.Background(), recipient, types.ChatPresence("composing"), types.ChatPresenceMedia(media))
+		err := sendMessageClient.SendChatPresence(context.Background(), recipient, types.ChatPresence("composing"), types.ChatPresenceMedia(media))
 		if err != nil {
 			return nil, err
 		}
 
 		time.Sleep(time.Duration(data.Delay) * time.Millisecond)
 
-		err = s.clientPointer[instance.Id].SendChatPresence(context.Background(), recipient, types.ChatPresence("paused"), types.ChatPresenceMedia(media))
+		err = sendMessageClient.SendChatPresence(context.Background(), recipient, types.ChatPresence("paused"), types.ChatPresenceMedia(media))
 		if err != nil {
 			return nil, err
 		}
@@ -2510,6 +2523,15 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
 				}
 			}
+		case "EventMessage":
+			// [Athene] Evento/agenda (PR #90)
+			if msg.EventMessage != nil {
+				msg.EventMessage.ContextInfo = &waE2E.ContextInfo{
+					StanzaID:      proto.String(data.Quoted.MessageID),
+					Participant:   proto.String(data.Quoted.Participant),
+					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
+				}
+			}
 		default:
 			return nil, fmt.Errorf("invalid messageType: %s", messageType)
 		}
@@ -2554,6 +2576,11 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 			// [Athene] Card de produto do catálogo
 			if msg.ProductMessage != nil {
 				msg.ProductMessage.ContextInfo = &waE2E.ContextInfo{}
+			}
+		case "EventMessage":
+			// [Athene] Evento/agenda (PR #90)
+			if msg.EventMessage != nil {
+				msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
 			}
 		default:
 			return nil, fmt.Errorf("invalid messageType: %s", messageType)
@@ -2642,7 +2669,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 	// Only try to get participants for actual groups, not newsletters
 	if isGroup && !isNewsletter {
 		if data.MentionAll {
-			groupInfo, err := s.clientPointer[instance.Id].GetGroupInfo(context.Background(), recipient)
+			groupInfo, err := sendMessageClient.GetGroupInfo(context.Background(), recipient)
 			if err != nil {
 				return nil, err
 			}
@@ -2698,6 +2725,11 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
 				}
 				msg.LocationMessage.ContextInfo.MentionedJID = mentionedJIDs
+			case "EventMessage":
+				if msg.EventMessage.ContextInfo == nil {
+					msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
+				}
+				msg.EventMessage.ContextInfo.MentionedJID = mentionedJIDs
 			case "ContactMessage":
 				if msg.ContactMessage.ContextInfo == nil {
 					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
@@ -2754,6 +2786,11 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
 				}
 				msg.LocationMessage.ContextInfo.MentionedJID = data.MentionedJID
+			case "EventMessage":
+				if msg.EventMessage.ContextInfo == nil {
+					msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
+				}
+				msg.EventMessage.ContextInfo.MentionedJID = data.MentionedJID
 			case "ContactMessage":
 				if msg.ContactMessage.ContextInfo == nil {
 					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
@@ -2781,7 +2818,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 		sendExtra.AdditionalNodes = data.AdditionalNodes
 	}
 
-	response, err := s.clientPointer[instance.Id].SendMessage(context.Background(), recipient, msg, sendExtra)
+	response, err := sendMessageClient.SendMessage(context.Background(), recipient, msg, sendExtra)
 	if err != nil {
 		s.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error sending message: %v", instance.Id, err)
 		return nil, err
@@ -2792,7 +2829,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 	messageInfo := types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     recipient,
-			Sender:   *s.clientPointer[instance.Id].Store.ID,
+			Sender:   *sendMessageClient.Store.ID,
 			IsFromMe: true,
 			IsGroup:  isGroup,
 		},
@@ -2846,15 +2883,15 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 		sticker := msg.GetStickerMessage()
 
 		if img != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), img)
+			data, err = sendMessageClient.Download(context.Background(), img)
 		} else if audio != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), audio)
+			data, err = sendMessageClient.Download(context.Background(), audio)
 		} else if document != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), document)
+			data, err = sendMessageClient.Download(context.Background(), document)
 		} else if video != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), video)
+			data, err = sendMessageClient.Download(context.Background(), video)
 		} else if sticker != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), sticker)
+			data, err = sendMessageClient.Download(context.Background(), sticker)
 
 			webpReader := bytes.NewReader(data)
 			img, err := webp.Decode(webpReader)

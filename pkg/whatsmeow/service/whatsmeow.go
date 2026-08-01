@@ -174,8 +174,16 @@ type ProxyConfig struct {
 func (w whatsmeowService) ReconnectClient(instanceId string) error {
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Starting reconnection process - simulating restart", instanceId)
 
-	// Passo 1: Limpar conexão existente se houver
-	if client, exists := w.clientPointer[instanceId]; exists {
+	// Passo 1: Limpar conexão existente se houver.
+	// [Athene/PR#127] Copia as referências client/mycli sob RLock e libera antes
+	// de qualquer chamada de rede (IsConnected/Disconnect/RemoveEventHandler podem
+	// bloquear) — ver client_maps.go.
+	ClientMapsMu.RLock()
+	client, exists := w.clientPointer[instanceId]
+	mycli, hasMycli := w.myClientPointer[instanceId]
+	ClientMapsMu.RUnlock()
+
+	if exists {
 		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Disconnecting existing client", instanceId)
 
 		// Desconectar o cliente WebSocket
@@ -185,7 +193,7 @@ func (w whatsmeowService) ReconnectClient(instanceId string) error {
 		}
 
 		// Remover event handler se existir
-		if mycli, ok := w.myClientPointer[instanceId]; ok {
+		if hasMycli {
 			if mycli.eventHandlerID != 0 {
 				client.RemoveEventHandler(mycli.eventHandlerID)
 				w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Event handler removed", instanceId)
@@ -196,8 +204,13 @@ func (w whatsmeowService) ReconnectClient(instanceId string) error {
 	// Passo 2: Limpar todos os recursos da instância
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Cleaning up resources", instanceId)
 
-	// Enviar sinal de kill se o canal existir
-	if killChan, exists := w.killChannel[instanceId]; exists {
+	// Enviar sinal de kill se o canal existir. [Athene/PR#127] Copia o canal sob
+	// RLock e faz o send/select na cópia local só depois de liberar o lock.
+	ClientMapsMu.RLock()
+	killChan, hasKillChan := w.killChannel[instanceId]
+	ClientMapsMu.RUnlock()
+
+	if hasKillChan {
 		select {
 		case killChan <- true:
 			w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Kill signal sent", instanceId)
@@ -206,10 +219,12 @@ func (w whatsmeowService) ReconnectClient(instanceId string) error {
 		}
 	}
 
-	// Remover das estruturas
+	// Remover das estruturas — [Athene/PR#127] os três deletes juntos sob um único Lock.
+	ClientMapsMu.Lock()
 	delete(w.clientPointer, instanceId)
 	delete(w.myClientPointer, instanceId)
 	delete(w.killChannel, instanceId)
+	ClientMapsMu.Unlock()
 
 	// Limpar cache de userInfo para esta instância
 	if instance, err := w.instanceRepository.GetInstanceByID(instanceId); err == nil {
@@ -360,8 +375,12 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	var deviceStore *store.Device
 	var err error
 
-	if w.clientPointer[cd.Instance.Id] != nil {
-		if w.clientPointer[cd.Instance.Id].IsConnected() {
+	ClientMapsMu.RLock()
+	existingClient := w.clientPointer[cd.Instance.Id]
+	ClientMapsMu.RUnlock()
+
+	if existingClient != nil {
+		if existingClient.IsConnected() {
 			return
 		}
 	}
@@ -457,7 +476,9 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	// do EvoGO até 0.7.2).
 	client.SendReportingTokens = false
 
+	ClientMapsMu.Lock()
 	w.clientPointer[cd.Instance.Id] = client
+	ClientMapsMu.Unlock()
 
 	if cd.IsProxy {
 		var proxyConfig ProxyConfig
@@ -545,7 +566,9 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	mycli.eventHandlerID = mycli.WAClient.AddEventHandler(mycli.myEventHandler)
 
 	// Armazena o MyClient no map para permitir atualizações posteriores
+	ClientMapsMu.Lock()
 	w.myClientPointer[cd.Instance.Id] = mycli
+	ClientMapsMu.Unlock()
 
 	if client.Store.ID != nil {
 		w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Already logged in with JID: %s", cd.Instance.Id, client.Store.ID.String())
@@ -618,13 +641,24 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	// Removed auto-reconnect logic to prevent infinite loops
 
 	for {
+		// [Athene/PR#127] Relê o kill channel do map compartilhado a cada iteração
+		// (pode ser substituído por um ReconnectClient/StartInstance concorrente da
+		// mesma instância): copia sob RLock, libera, e faz o select na cópia local.
+		// Entrada ausente vira canal nil, que nunca dispara — igual ao acesso
+		// original sem lock.
+		ClientMapsMu.RLock()
+		killChan := w.killChannel[cd.Instance.Id]
+		ClientMapsMu.RUnlock()
+
 		select {
-		case <-w.killChannel[cd.Instance.Id]:
+		case <-killChan:
 			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Received kill signal for user '%s'", cd.Instance.Id)
 			client.Disconnect()
 
+			ClientMapsMu.Lock()
 			delete(w.clientPointer, cd.Instance.Id)
 			delete(w.myClientPointer, cd.Instance.Id)
+			ClientMapsMu.Unlock()
 
 			// Limpar cache de userInfo para esta instância
 			w.userInfoCache.Delete(cd.Instance.Token)
@@ -684,6 +718,11 @@ func schedulePresenceUpdates(mycli *MyClient) {
 	defer ticker.Stop()
 
 	for {
+		// [Athene/PR#127] Copia o kill channel do map sob RLock antes do select.
+		ClientMapsMu.RLock()
+		killChan := mycli.killChannel[mycli.userID]
+		ClientMapsMu.RUnlock()
+
 		select {
 		case <-ticker.C:
 			// Verificar se a instância ainda existe
@@ -699,7 +738,7 @@ func schedulePresenceUpdates(mycli *MyClient) {
 			randomInterval := time.Duration(1+rand.Intn(3)) * time.Hour
 			ticker = time.NewTicker(randomInterval)
 
-		case <-mycli.killChannel[mycli.userID]:
+		case <-killChan:
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Received kill signal, stopping presence updates", mycli.userID)
 			return // Encerra a goroutine quando receber sinal de kill
 		}
@@ -893,7 +932,10 @@ func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 	// maps (it is the single writer for this instance). Blocking send mirrors
 	// the original timeout branch so the signal is never dropped.
 	mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] QR timeout — signaling kill channel", instanceID)
-	if killChan, exists := mycli.killChannel[instanceID]; exists {
+	ClientMapsMu.RLock()
+	killChan, exists := mycli.killChannel[instanceID]
+	ClientMapsMu.RUnlock()
+	if exists {
 		killChan <- true
 	}
 }
@@ -1322,7 +1364,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				fmt.Printf("[POLL DEBUG] ✅ mycli.WAClient is initialized: %s\n", mycli.WAClient.Store.ID)
 			}
 
-			decrypted, err := mycli.clientPointer[mycli.userID].DecryptPollVote(context.Background(), evt)
+			ClientMapsMu.RLock()
+			pollVoteClient := mycli.clientPointer[mycli.userID]
+			ClientMapsMu.RUnlock()
+			decrypted, err := pollVoteClient.DecryptPollVote(context.Background(), evt)
 			if err != nil {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt vote: %v", mycli.userID, err)
 			} else {
@@ -1862,12 +1907,15 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		doWebhook = true
 		postMap["event"] = "Archive"
 
-		dataMap := postMap["data"].(map[string]interface{})
-		dataMap["JID"] = evt.JID
-		dataMap["Timestamp"] = evt.Timestamp
-		dataMap["Action"] = evt.Action
-		dataMap["FromFullSync"] = evt.FromFullSync
-		postMap["data"] = dataMap
+		// [Athene/PR#125] postMap não tem a chave "data" neste ponto, então o type
+		// assertion antigo dava panic (derruba o processo inteiro) sempre que um
+		// chat era (des)arquivado no celular. Monta o mapa direto.
+		postMap["data"] = map[string]interface{}{
+			"JID":          evt.JID,
+			"Timestamp":    evt.Timestamp,
+			"Action":       evt.Action,
+			"FromFullSync": evt.FromFullSync,
+		}
 
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Chat archived", mycli.userID)
 	case *events.HistorySync:
@@ -1942,7 +1990,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 
 		// Agora mata o canal DEPOIS de enviar o evento
-		mycli.killChannel[mycli.userID] <- true
+		ClientMapsMu.RLock()
+		loggedOutKillChan := mycli.killChannel[mycli.userID]
+		ClientMapsMu.RUnlock()
+		loggedOutKillChan <- true
 	case *events.ChatPresence:
 		doWebhook = true
 		postMap["event"] = "ChatPresence"
@@ -2033,6 +2084,34 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
 			}
 		}(mycli.userID)
+	case *events.KeepAliveTimeout:
+		doWebhook = true
+		postMap["event"] = "KeepAliveTimeout"
+		postMap["data"] = map[string]interface{}{
+			"ErrorCount":  evt.ErrorCount,
+			"LastSuccess": evt.LastSuccess,
+		}
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Keepalive ping timed out (%d consecutive, last success: %s)", mycli.userID, evt.ErrorCount, evt.LastSuccess.Format(time.RFC3339))
+
+		// [Athene/PR#126] Com EnableAutoReconnect desligado, uma conexão TCP que
+		// morre em silêncio (NAT timeout, queda de rede) fica "zumbi": o keepalive
+		// expira pra sempre sem nunca emitir events.Disconnected — a instância
+		// segue "conectada" mas não envia nem recebe. Após 3 timeouts seguidos,
+		// reinicia pelo mesmo caminho não-bloqueante do handler de Disconnected.
+		// O match exato (== 3) evita empilhar restarts com 4, 5, ... enquanto um
+		// já está em andamento.
+		if evt.ErrorCount == 3 {
+			go func(instanceID string) {
+				mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] 3 consecutive keepalive timeouts, restarting instance", instanceID)
+				if err := mycli.service.ReconnectClient(instanceID); err != nil {
+					mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
+				}
+			}(mycli.userID)
+		}
+	case *events.KeepAliveRestored:
+		doWebhook = true
+		postMap["event"] = "KeepAliveRestored"
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Keepalive pings restored", mycli.userID)
 	case *events.LabelEdit:
 		doWebhook = true
 		postMap["event"] = "LabelEdit"
@@ -2267,7 +2346,7 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 		if contains(subscriptions, "CONNECTION") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
@@ -2427,7 +2506,9 @@ func (w whatsmeowService) StartInstance(instanceId string) error {
 		}
 	}
 
+	ClientMapsMu.Lock()
 	w.killChannel[instance.Id] = make(chan bool)
+	ClientMapsMu.Unlock()
 
 	clientData := &ClientData{
 		Instance:      instance,
@@ -2555,7 +2636,7 @@ func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, 
 				globalEventType = "CHAT_PRESENCE"
 			case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
 				globalEventType = "CALL"
-			case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+			case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 				globalEventType = "CONNECTION"
 			case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
 				globalEventType = "LABEL"
@@ -2617,7 +2698,7 @@ func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, 
 			globalEventType = "CHAT_PRESENCE"
 		case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
 			globalEventType = "CALL"
-		case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+		case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 			globalEventType = "CONNECTION"
 		case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
 			globalEventType = "LABEL"
@@ -2728,7 +2809,9 @@ func (w whatsmeowService) UpdateInstanceSettings(instanceId string) error {
 	}
 
 	// Verifica se o MyClient existe
+	ClientMapsMu.RLock()
 	myClient, exists := w.myClientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !exists {
 		w.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] MyClient not found in runtime, instance may not be connected", instanceId)
 		return fmt.Errorf("instance %s not found in runtime", instanceId)
@@ -2787,7 +2870,9 @@ func (w whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) erro
 	}
 
 	// Verifica se o MyClient existe
+	ClientMapsMu.RLock()
 	myClient, exists := w.myClientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !exists {
 		w.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] MyClient not found in runtime, instance may not be connected", instanceId)
 		return fmt.Errorf("instance %s not found in runtime", instanceId)
@@ -2806,20 +2891,32 @@ func (w whatsmeowService) ClearInstanceCache(instanceId string, token string) er
 	// Limpar userInfoCache
 	w.userInfoCache.Delete(token)
 
-	// Limpar myClientPointer se existir
-	if _, exists := w.myClientPointer[instanceId]; exists {
+	// [Athene/PR#127] Os três check-and-delete acontecem sob um único Lock, pra
+	// que um leitor/escritor concorrente nunca veja uma instância meio-limpa. O
+	// send/close no kill channel é feito depois, na cópia local, com o lock
+	// liberado (ver client_maps.go).
+	ClientMapsMu.Lock()
+	_, hadMyClient := w.myClientPointer[instanceId]
+	if hadMyClient {
 		delete(w.myClientPointer, instanceId)
+	}
+	_, hadClient := w.clientPointer[instanceId]
+	if hadClient {
+		delete(w.clientPointer, instanceId)
+	}
+	killChan, hadKillChan := w.killChannel[instanceId]
+	if hadKillChan {
+		delete(w.killChannel, instanceId)
+	}
+	ClientMapsMu.Unlock()
+
+	if hadMyClient {
 		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] MyClient pointer cleared", instanceId)
 	}
-
-	// Limpar clientPointer se existir
-	if _, exists := w.clientPointer[instanceId]; exists {
-		delete(w.clientPointer, instanceId)
+	if hadClient {
 		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Client pointer cleared", instanceId)
 	}
-
-	// Limpar killChannel se existir
-	if killChan, exists := w.killChannel[instanceId]; exists {
+	if hadKillChan {
 		select {
 		case killChan <- true:
 			// Canal recebeu o sinal
@@ -2827,7 +2924,6 @@ func (w whatsmeowService) ClearInstanceCache(instanceId string, token string) er
 			// Canal pode estar bloqueado, apenas fecha
 		}
 		close(killChan)
-		delete(w.killChannel, instanceId)
 		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Kill channel cleared", instanceId)
 	}
 
@@ -2893,7 +2989,9 @@ func (w *whatsmeowService) PasskeyCeremonyStore() *ceremony.Store {
 // SubmitPasskeyResponse forwards the browser's WebAuthn assertion to WhatsApp
 // for the given instance. Called by POST /passkey-ceremony/{token}/response.
 func (w *whatsmeowService) SubmitPasskeyResponse(instanceId string, resp *types.WebAuthnResponse) error {
+	ClientMapsMu.RLock()
 	client, ok := w.clientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !ok || client == nil {
 		return fmt.Errorf("no active client for instance %s", instanceId)
 	}
@@ -2912,7 +3010,9 @@ func (w *whatsmeowService) SubmitPasskeyResponse(instanceId string, resp *types.
 // ConfirmPasskey finishes the pairing after the user verified the code.
 // Called by POST /passkey-ceremony/{token}/confirm.
 func (w *whatsmeowService) ConfirmPasskey(instanceId string) error {
+	ClientMapsMu.RLock()
 	client, ok := w.clientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !ok || client == nil {
 		return fmt.Errorf("no active client for instance %s", instanceId)
 	}

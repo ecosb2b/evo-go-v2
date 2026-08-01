@@ -35,14 +35,16 @@ type Instance struct {
 	IgnoreStatus  bool   `json:"ignoreStatus" gorm:"default:false"`
 }
 
-// AdvancedSettings representa as configurações avançadas de uma instância
+// AdvancedSettings representa as configurações avançadas de uma instância.
+// [Athene/PR#136] Os bools são ponteiros para que chaves JSON omitidas no PUT
+// não sejam gravadas como false (update parcial).
 type AdvancedSettings struct {
-	AlwaysOnline  bool   `json:"alwaysOnline"`
-	RejectCall    bool   `json:"rejectCall"`
+	AlwaysOnline  *bool  `json:"alwaysOnline"`
+	RejectCall    *bool  `json:"rejectCall"`
 	MsgRejectCall string `json:"msgRejectCall"`
-	ReadMessages  bool   `json:"readMessages"`
-	IgnoreGroups  bool   `json:"ignoreGroups"`
-	IgnoreStatus  bool   `json:"ignoreStatus"`
+	ReadMessages  *bool  `json:"readMessages"`
+	IgnoreGroups  *bool  `json:"ignoreGroups"`
+	IgnoreStatus  *bool  `json:"ignoreStatus"`
 }
 
 func (m *Instance) BeforeCreate(tx *gorm.DB) (err error) {
@@ -50,4 +52,9 @@ func (m *Instance) BeforeCreate(tx *gorm.DB) (err error) {
 		m.Id = uuid.New().String()
 	}
 	return
+}
+
+// BoolPtr devolve um ponteiro para v (helper para respostas/updates de AdvancedSettings). [Athene/PR#136]
+func BoolPtr(v bool) *bool {
+	return &v
 }

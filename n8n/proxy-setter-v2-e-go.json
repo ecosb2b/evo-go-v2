@@ -1,0 +1,737 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Quando Chamado",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        592,
+        272
+      ],
+      "id": "077df012-52ba-4612-b1a5-b8797b98b2c7"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Estado inicial do loop de tentativas.\n// [Athene] Agora compatível com Evolution v2 E Evolution Go.\n//\n// O fluxo PAI deve passar:\n//   instance      -> (v2) nome da instância | (go) usado só para log/URL v2\n//   apikey        -> (v2) token da instância | (go) GLOBAL API KEY (AuthAdmin)\n//   evo_tipo      -> 'v2' (default) ou 'go'\n//   instance_id   -> (go) UUID da instância (obrigatório p/ Go)\n//   evo_base_url  -> base da API (default = domínio v2). Ex Go: https://evogo.seu-dominio\n//\n// Compatibilidade: sem evo_tipo/evo_base_url o comportamento é o v2 de antes.\nreturn { json: {\n  instance: $json.instance,\n  apikey: $json.apikey || $env.ATHENE_EVO_APIKEY || '',\n  evo_tipo: String($json.evo_tipo || 'v2').toLowerCase(),\n  instance_id: $json.instance_id || $json.instanceId || '',\n  evo_base_url: String($json.evo_base_url || $env.ATHENE_EVO_BASE_URL || 'https://evo.athenesistemas.com.br').replace(/\\/+$/, ''),\n  limite_envios: Number($json.limite_envios || 50),\n  tentativa: 1,\n  max_tentativas: 5,\n  tentativas_mesma_empresa: 3\n} };"
+      },
+      "name": "Init Tentativa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        272
+      ],
+      "id": "aa170466-d856-47d8-8f8e-0368b20602ce"
+    },
+    {
+      "parameters": {
+        "jsCode": "const SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst s = $json;\nconst timestamp = Date.now().toString();\nconst dataObj = { limite_envios: s.limite_envios, instance: s.instance };\n// Tentativas 1..tentativas_mesma_empresa priorizam a MESMA empresa_id da última vez\n// (consistência de IP de saída = menor risco de o WhatsApp desconfiar do número).\n// Depois disso, o Hub escolhe livremente (geo/carga).\nif (s.tentativa <= s.tentativas_mesma_empresa) dataObj.preferir_mesma_empresa = true;\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { ...s, req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy Ideal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        272
+      ],
+      "id": "87544e8c-4faa-44f6-9032-ce9aaa706660"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-ideal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy Ideal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1248,
+        272
+      ],
+      "id": "f6533a13-e611-45fe-adf5-9f58c7ca7216",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Junta o estado do loop (tentativa etc.) com a resposta do Hub.\nconst s = $('HMAC Proxy Ideal').item.json;\nconst resp = $json;\nconst hub_erro = !!resp.error;\nconst porta = Number(resp?.proxy?.porta || 0);\nreturn { json: {\n  instance: s.instance,\n  apikey: s.apikey,\n  limite_envios: s.limite_envios,\n  tentativa: s.tentativa,\n  max_tentativas: s.max_tentativas,\n  tentativas_mesma_empresa: s.tentativas_mesma_empresa,\n  hub_erro,\n  porta,\n  empresa_id: resp?.proxy?.empresa_id ?? null,\n  maquina_nome: resp?.proxy?.maquina_nome ?? null\n} };"
+      },
+      "name": "Avaliar Hub",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1472,
+        272
+      ],
+      "id": "5973adca-2217-4c4c-9487-f7bd20b877a4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.hub_erro === false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Hub OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1680,
+        272
+      ],
+      "id": "9624316d-e80b-4afe-b6aa-78faf4940c0c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.porta > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Porta Válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1904,
+        160
+      ],
+      "id": "c6b53f33-5d73-4daf-9ef1-ca27aaf9cd5f"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Avaliar Hub').item.json.porta }}",
+          "timeout": 5000
+        }
+      },
+      "name": "Ping Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2128,
+        64
+      ],
+      "id": "9c1c3cab-ef07-40af-b6dd-803591823946",
+      "retryOnFail": true,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0000000-0000-4000-8000-000000000003",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Ping OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2352,
+        64
+      ],
+      "id": "1c3bf6c8-2abb-47de-85bd-52be02bc6a07"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "name": "Wait Salva-Vidas",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2560,
+        192
+      ],
+      "id": "6a841bde-9c3c-4895-a813-ad97a49f83cb",
+      "webhookId": "c0000000-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "url": "https://api-hub.athenesistemas.com.br/api/whoami",
+        "options": {
+          "proxy": "={{ 'http://' + $env.ATHENE_GATEWAY_IP + ':' + $('Avaliar Hub').item.json.porta }}",
+          "timeout": 10000
+        }
+      },
+      "name": "Ping Salva-Vidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2784,
+        192
+      ],
+      "id": "9e2b4b22-d181-4183-a83c-b46be1be1d50",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0000000-0000-4000-8000-000000000004",
+              "leftValue": "={{ $json.error ? 'erro' : 'ok' }}",
+              "rightValue": "ok",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Salva-Vidas OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3008,
+        192
+      ],
+      "id": "59341f5c-118b-4a0f-9d32-faa625aa11c3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Init Tentativa').first().json.evo_tipo === 'go' ? ($('Init Tentativa').first().json.evo_base_url + '/instance/proxy/' + $('Init Tentativa').first().json.instance_id) : ($('Init Tentativa').first().json.evo_base_url + '/proxy/set/' + $('Init Tentativa').first().json.instance) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Init Tentativa').first().json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": true,\n  \"host\": \"{{ $env.ATHENE_GATEWAY_IP }}\",\n  \"port\": \"{{ $('Avaliar Hub').item.json.porta }}\",\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Set Proxy Evolution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3440,
+        32
+      ],
+      "id": "5d86ffe8-f92d-4b92-a94a-d06537946223",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verifica se o Evolution realmente aplicou a porta esperada.\n// [Athene] Leitura da porta adaptada por versão:\n//   v2 -> resp.proxy.proxy.port | resp.proxy.port\n//   go -> resp.data.port  (o fork ecoa exatamente a porta enviada)\nconst s = $('Avaliar Hub').item.json;\nconst resp = $json;\nconst tipo = String($('Init Tentativa').first().json.evo_tipo || 'v2');\nlet aplicada;\nif (tipo === 'go') {\n  aplicada = Number(resp?.data?.port ?? 0);\n} else {\n  aplicada = Number(resp?.proxy?.proxy?.port ?? resp?.proxy?.port ?? 0);\n}\nconst esperada = Number(s.porta || 0);\nconst ok = !resp.error && esperada > 0 && aplicada === esperada;\nconst motivo = ok ? null : 'Evolution não aplicou o Proxy';\nreturn { json: {\n  success: ok,\n  porta: ok ? esperada : 0,\n  empresa_id: s.empresa_id,\n  maquina_nome: s.maquina_nome,\n  tentativas_usadas: s.tentativa,\n  motivo_falha: motivo,\n  erro_formatado: ok ? null : '[' + (s.empresa_id || 'Desconhecida') + ' - ' + (s.maquina_nome || 'Desconhecida') + '] ' + motivo\n} };"
+      },
+      "name": "Montar Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3664,
+        32
+      ],
+      "id": "d79860b8-1a3d-40e0-856a-aa2293912540"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Proxy morto: avisa o Hub para tirar essa porta de rotação.\nconst s = $('Avaliar Hub').item.json;\nconst SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst timestamp = Date.now().toString();\nconst dataObj = { porta: s.porta || 0 };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\nreturn { json: { ...s, req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Proxy Morto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3232,
+        320
+      ],
+      "id": "6d21afac-576b-4043-8fa6-7b09f655a3d5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-morto",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Hub Proxy Morto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3440,
+        320
+      ],
+      "id": "471cbc78-45a1-4aed-af46-29ef2630171e",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('HMAC Proxy Morto').item.json;\nconst { req_body, hub_erro, porta, empresa_id, maquina_nome, ...rest } = s;\nreturn { json: { ...rest, empresa_id, maquina_nome, tentativa: rest.tentativa + 1 } };"
+      },
+      "name": "Próxima Tentativa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3664,
+        320
+      ],
+      "id": "04645f7d-e48f-4cfe-a5a3-934a8432d850"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b0000000-0000-4000-8000-000000000005",
+              "leftValue": "={{ $json.tentativa <= $json.max_tentativas }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Tem Tentativas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3888,
+        320
+      ],
+      "id": "2f9d2bd0-eee7-44dd-bd6e-94c3c729bdc0"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $json;\nconst motivo = 'Falha na Prova de Vida (Túnel sem navegação) - todas as ' + s.max_tentativas + ' tentativas de proxy esgotadas';\nreturn { json: {\n  success: false,\n  porta: 0,\n  empresa_id: s.empresa_id ?? null,\n  maquina_nome: s.maquina_nome ?? null,\n  tentativas_usadas: s.max_tentativas,\n  motivo_falha: motivo,\n  erro_formatado: '[' + (s.empresa_id || 'Desconhecida') + ' - ' + (s.maquina_nome || 'Desconhecida') + '] ' + motivo\n} };"
+      },
+      "name": "Falha - Tentativas Esgotadas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4112,
+        432
+      ],
+      "id": "0b12b1b8-c0d6-4d77-b096-38d9ea215ccf"
+    },
+    {
+      "parameters": {
+        "method": "={{ $('Init Tentativa').first().json.evo_tipo === 'go' ? 'DELETE' : 'POST' }}",
+        "url": "={{ $('Init Tentativa').first().json.evo_tipo === 'go' ? ($('Init Tentativa').first().json.evo_base_url + '/instance/proxy/' + $('Init Tentativa').first().json.instance_id) : ($('Init Tentativa').first().json.evo_base_url + '/proxy/set/' + $('Init Tentativa').first().json.instance) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Init Tentativa').first().json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"enabled\": false,\n  \"host\": \"\",\n  \"port\": 0,\n  \"protocol\": \"http\"\n}",
+        "options": {}
+      },
+      "name": "Desativar Proxy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2128,
+        320
+      ],
+      "id": "3fa04678-0706-4930-8da6-91f8a8b09a39",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('Avaliar Hub').item.json;\nconst motivo = 'Nenhum proxy disponível/válido - envio BLOQUEADO por segurança';\nreturn { json: {\n  success: false,\n  porta: 0,\n  empresa_id: s.empresa_id,\n  maquina_nome: s.maquina_nome,\n  tentativas_usadas: s.tentativa,\n  motivo_falha: motivo,\n  erro_formatado: '[' + (s.empresa_id || 'Desconhecida') + ' - ' + (s.maquina_nome || 'Desconhecida') + '] ' + motivo\n} };"
+      },
+      "name": "Falha - Sem Porta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        320
+      ],
+      "id": "142de69d-3ff0-4ff1-bc9b-de9477574543"
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $('HMAC Proxy Ideal').item.json;\nconst motivo = 'Hub Recusou: Nenhum proxy disponível';\nreturn { json: {\n  success: false,\n  porta: 0,\n  empresa_id: null,\n  maquina_nome: null,\n  tentativas_usadas: s.tentativa,\n  motivo_falha: motivo,\n  erro_formatado: '[Desconhecida - Desconhecida] ' + motivo\n} };"
+      },
+      "name": "Falha - Hub Recusou",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        464
+      ],
+      "id": "8b3c2ccf-b361-40a8-9b71-671632eef318"
+    },
+    {
+      "parameters": {},
+      "name": "Resultado",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4320,
+        208
+      ],
+      "id": "3186c201-fb3f-4fdc-b0d0-8f02b9103a29"
+    }
+  ],
+  "connections": {
+    "Quando Chamado": {
+      "main": [
+        [
+          {
+            "node": "Init Tentativa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Tentativa": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy Ideal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy Ideal": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy Ideal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy Ideal": {
+      "main": [
+        [
+          {
+            "node": "Avaliar Hub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avaliar Hub": {
+      "main": [
+        [
+          {
+            "node": "Hub OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub OK?": {
+      "main": [
+        [
+          {
+            "node": "Porta Válida?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha - Hub Recusou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Porta Válida?": {
+      "main": [
+        [
+          {
+            "node": "Ping Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Desativar Proxy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Proxy": {
+      "main": [
+        [
+          {
+            "node": "Ping OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping OK?": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait Salva-Vidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Salva-Vidas": {
+      "main": [
+        [
+          {
+            "node": "Ping Salva-Vidas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Salva-Vidas": {
+      "main": [
+        [
+          {
+            "node": "Salva-Vidas OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salva-Vidas OK?": {
+      "main": [
+        [
+          {
+            "node": "Set Proxy Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HMAC Proxy Morto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Proxy Evolution": {
+      "main": [
+        [
+          {
+            "node": "Montar Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Resultado": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Proxy Morto": {
+      "main": [
+        [
+          {
+            "node": "Hub Proxy Morto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hub Proxy Morto": {
+      "main": [
+        [
+          {
+            "node": "Próxima Tentativa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Próxima Tentativa": {
+      "main": [
+        [
+          {
+            "node": "Tem Tentativas?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem Tentativas?": {
+      "main": [
+        [
+          {
+            "node": "HMAC Proxy Ideal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Falha - Tentativas Esgotadas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha - Tentativas Esgotadas": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Desativar Proxy": {
+      "main": [
+        [
+          {
+            "node": "Falha - Sem Porta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha - Sem Porta": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Falha - Hub Recusou": {
+      "main": [
+        [
+          {
+            "node": "Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  }
+}

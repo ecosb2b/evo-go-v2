@@ -131,7 +131,9 @@ type PrivacyStruct struct {
 }
 
 func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
+	whatsmeow_service.ClientMapsMu.RLock()
 	client := u.clientPointer[instanceId]
+	whatsmeow_service.ClientMapsMu.RUnlock()
 	u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -145,7 +147,9 @@ func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
+		whatsmeow_service.ClientMapsMu.RLock()
 		client = u.clientPointer[instanceId]
+		whatsmeow_service.ClientMapsMu.RUnlock()
 		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -473,7 +477,27 @@ func (u *userService) SaveContact(data *SaveContactStruct, instance *instance_mo
 		}},
 	}
 
-	if err := client.SendAppState(context.Background(), patch); err != nil {
+	err = client.SendAppState(context.Background(), patch)
+	if err != nil && (strings.Contains(err.Error(), "conflict") || strings.Contains(err.Error(), "LTHash")) {
+		// [Athene] App state da coleção critical_unblock_low dessincronizou (409/LTHash).
+		// A recuperação incremental do whatsmeow não resolve; força um FULL SYNC
+		// (apaga a versão local e re-baixa o snapshot do servidor) e retenta uma vez.
+		u.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] app state conflict on savecontact, forcing full sync of critical_unblock_low", instance.Id)
+		if ferr := client.FetchAppState(context.Background(), appstate.WAPatchCriticalUnblockLow, true, false); ferr != nil {
+			// Full sync também falhou (snapshot do servidor não verifica): corrupção
+			// profunda. Último recurso: pedir ao celular primário que reenvie a coleção
+			// (recuperação fatal). É assíncrono — o celular responde e o whatsmeow
+			// reconstrói em background; o usuário deve tentar de novo após alguns segundos.
+			u.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] full sync failed (%v); requesting fatal recovery from primary device", instance.Id, ferr)
+			recMsg := whatsmeow.BuildAppStateRecoveryRequest(appstate.WAPatchCriticalUnblockLow)
+			if _, serr := client.SendPeerMessage(context.Background(), recMsg); serr != nil {
+				return fmt.Errorf("app state (contatos) corrompido e falha ao pedir recuperação ao celular: %w", serr)
+			}
+			return errors.New("o app state de contatos estava corrompido; solicitei recuperação ao celular primário. Deixe o celular online e tente novamente em ~30 segundos")
+		}
+		err = client.SendAppState(context.Background(), patch)
+	}
+	if err != nil {
 		u.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error saving contact %s: %v", instance.Id, jid.String(), err)
 		return err
 	}

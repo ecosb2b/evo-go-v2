@@ -649,9 +649,20 @@ func (h *instanceHandler) UpdateAdvancedSettings(c *gin.Context) {
 		return
 	}
 
+	// [Athene/PR#136] Devolve as settings persistidas (linha completa) para que a
+	// resposta do PUT parcial fique consistente.
+	persisted, err := h.instanceService.GetAdvancedSettings(instanceId)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Advanced settings updated successfully",
+			"settings": settings,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Advanced settings updated successfully",
-		"settings": settings,
+		"settings": persisted,
 	})
 }
 
