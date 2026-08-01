@@ -418,26 +418,41 @@ func (g *groupService) GetMyGroups(instance *instance_model.Instance) ([]types.G
 
 	resp, err := client.GetJoinedGroups(context.Background())
 	if err != nil {
-		g.loggerWrapper.GetLogger(instance.Id).LogError("[%s] error create group: %v", instance.Id, err)
+		g.loggerWrapper.GetLogger(instance.Id).LogError("[%s] error getting joined groups: %v", instance.Id, err)
 		return nil, err
 	}
 
-	var jid string = client.Store.ID.String()
-	var jidClear = strings.Split(jid, ".")[0]
-	jidOfAdmin, ok := utils.ParseJID(jidClear)
-	if !ok {
-		g.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error validating message fields", instance.Id)
-		return nil, errors.New("invalid phone number")
-	}
-	var adminGroups []types.GroupInfo
+	// ToNonAD removes the device suffix (e.g. ":5") so the phone number
+	// can be compared against OwnerPN and participant PhoneNumber fields.
+	// WhatsApp now uses LID format for JIDs, so we must compare via the
+	// phone number fields (OwnerPN / PhoneNumber) instead of OwnerJID / JID.
+	myUser := client.Store.ID.ToNonAD().User
+
+	myGroups := make([]types.GroupInfo, 0, len(resp))
 	for _, group := range resp {
-		if group.OwnerJID == jidOfAdmin {
-			adminGroups = append(adminGroups, *group)
-			_ = adminGroups
+		// Primary check: OwnerPN holds the owner's phone-number JID even when
+		// the main OwnerJID is in LID format. Guard myUser != "" to avoid
+		// false positives when the client JID is unexpectedly zero-valued.
+		ownerPhone := group.OwnerPN.User
+		ownerJID := group.OwnerJID.User
+		if myUser != "" && (ownerPhone == myUser || ownerJID == myUser) {
+			myGroups = append(myGroups, *group)
+			continue
+		}
+		// Fallback: scan participants; PhoneNumber is always phone-number JID.
+		for _, participant := range group.Participants {
+			participantPhone := participant.PhoneNumber.User
+			if participantPhone == "" {
+				participantPhone = participant.JID.User
+			}
+			if myUser != "" && participantPhone == myUser && (participant.IsAdmin || participant.IsSuperAdmin) {
+				myGroups = append(myGroups, *group)
+				break
+			}
 		}
 	}
 
-	return adminGroups, nil
+	return myGroups, nil
 }
 
 func (g *groupService) JoinGroupLink(data *JoinGroupStruct, instance *instance_model.Instance) error {
