@@ -266,10 +266,6 @@ func (i instances) Connect(data *ConnectStruct, instance *instance_model.Instanc
 	if !isInstanceRunning {
 		i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Starting new client instance", instance.Id)
 
-		whatsmeow_service.ClientMapsMu.Lock()
-		i.killChannel[instance.Id] = make(chan bool)
-		whatsmeow_service.ClientMapsMu.Unlock()
-
 		clientData := &whatsmeow_service.ClientData{
 			Instance:      instance,
 			Subscriptions: subscribedEvents,
@@ -327,10 +323,9 @@ func (i instances) Disconnect(instance *instance_model.Instance) (*instance_mode
 	if client.IsConnected() {
 		if client.IsLoggedIn() {
 			i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Disconnection successful", instance.Id)
-			whatsmeow_service.ClientMapsMu.RLock()
-			disconnectKillChan := i.killChannel[instance.Id]
-			whatsmeow_service.ClientMapsMu.RUnlock()
-			disconnectKillChan <- true
+			if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+				return instance, err
+			}
 
 			instance.Events = ""
 
@@ -365,18 +360,9 @@ func (i instances) Logout(instance *instance_model.Instance) (*instance_model.In
 			return instance, err
 		}
 
-		whatsmeow_service.ClientMapsMu.RLock()
-		logoutKillChan := i.killChannel[instance.Id]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		select {
-		case logoutKillChan <- true:
-		case <-time.After(5 * time.Second):
+		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+			return instance, err
 		}
-
-		whatsmeow_service.ClientMapsMu.Lock()
-		delete(i.clientPointer, instance.Id)
-		delete(i.killChannel, instance.Id)
-		whatsmeow_service.ClientMapsMu.Unlock()
 
 		i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Logout successful", instance.Id)
 		return instance, nil
@@ -385,18 +371,9 @@ func (i instances) Logout(instance *instance_model.Instance) (*instance_model.In
 	if client.IsConnected() {
 		client.Disconnect()
 
-		whatsmeow_service.ClientMapsMu.RLock()
-		disconnectKillChan := i.killChannel[instance.Id]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		select {
-		case disconnectKillChan <- true:
-		case <-time.After(5 * time.Second):
+		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+			return instance, err
 		}
-
-		whatsmeow_service.ClientMapsMu.Lock()
-		delete(i.clientPointer, instance.Id)
-		delete(i.killChannel, instance.Id)
-		whatsmeow_service.ClientMapsMu.Unlock()
 
 		i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Disconnection successful", instance.Id)
 		return instance, nil
@@ -645,22 +622,7 @@ func (i instances) Delete(id string) error {
 		deleteClient.Disconnect()
 	}
 
-	// Limpar todos os recursos da instância antes de deletar. [Athene/PR#127]
-	// Read-then-delete do killChannel sob o MESMO Lock do delete do clientPointer
-	// pra que um Delete()/cleanup concorrente não feche o canal duas vezes.
-	whatsmeow_service.ClientMapsMu.Lock()
-	delete(i.clientPointer, instance.Id)
-	deleteKillChan := i.killChannel[instance.Id]
-	if deleteKillChan != nil {
-		delete(i.killChannel, instance.Id)
-	}
-	whatsmeow_service.ClientMapsMu.Unlock()
-
-	if deleteKillChan != nil {
-		close(deleteKillChan)
-	}
-
-	// Limpar cache via whatsmeow service
+	// O serviço coordena o teardown e aguarda a goroutine proprietária terminar.
 	err = i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token)
 	if err != nil {
 		i.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Failed to clear instance cache: %v", instance.Id, err)
@@ -757,90 +719,15 @@ func (i instances) RemoveProxy(id string) error {
 
 func (i instances) ForceReconnect(instanceId string, number string) error {
 	whatsmeow_service.ClientMapsMu.RLock()
-	forceReconnectClient := i.clientPointer[instanceId]
+	client := i.clientPointer[instanceId]
 	whatsmeow_service.ClientMapsMu.RUnlock()
-	if forceReconnectClient.IsConnected() && forceReconnectClient.IsLoggedIn() {
+	if client != nil && client.IsConnected() && client.IsLoggedIn() {
 		return fmt.Errorf("client already connected")
 	}
-
-	err := i.whatsmeowService.ForceUpdateJid(instanceId, number)
-	if err != nil {
+	if err := i.whatsmeowService.ForceUpdateJid(instanceId, number); err != nil {
 		return err
 	}
-
-	instance, err := i.instanceRepository.GetInstanceByID(instanceId)
-	if err != nil {
-		return err
-	}
-
-	subscribedEvents := strings.Split(instance.Events, ",")
-
-	whatsmeow_service.ClientMapsMu.Lock()
-	i.killChannel[instance.Id] = make(chan bool)
-	whatsmeow_service.ClientMapsMu.Unlock()
-
-	clientData := &whatsmeow_service.ClientData{
-		Instance:      instance,
-		Subscriptions: subscribedEvents,
-		Phone:         "",
-		IsProxy:       false,
-	}
-
-	if instance.Proxy != "" || i.config.ProxyHost != "" {
-		var proxyConfig ProxyConfig
-		err := json.Unmarshal([]byte(instance.Proxy), &proxyConfig)
-		if err != nil {
-			i.loggerWrapper.GetLogger(instance.Id).LogError("[%s] error unmarshalling proxy config: %v", instance.Id, err)
-			return err
-		}
-
-		if proxyConfig.Host != "" || i.config.ProxyHost != "" {
-			clientData.IsProxy = true
-		}
-	}
-
-	whatsmeow_service.ClientMapsMu.RLock()
-	existingForceReconnectClient := i.clientPointer[instance.Id]
-	whatsmeow_service.ClientMapsMu.RUnlock()
-
-	if existingForceReconnectClient != nil {
-		existingForceReconnectClient.Disconnect()
-
-		whatsmeow_service.ClientMapsMu.RLock()
-		forceReconnectKillChan := i.killChannel[instance.Id]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		select {
-		case forceReconnectKillChan <- true:
-		case <-time.After(5 * time.Second):
-		}
-
-		whatsmeow_service.ClientMapsMu.Lock()
-		delete(i.clientPointer, instance.Id)
-		delete(i.killChannel, instance.Id)
-		whatsmeow_service.ClientMapsMu.Unlock()
-	}
-
-	go i.whatsmeowService.StartClient(clientData)
-
-	time.Sleep(2 * time.Second)
-
-	whatsmeow_service.ClientMapsMu.RLock()
-	newForceReconnectClient := i.clientPointer[instance.Id]
-	whatsmeow_service.ClientMapsMu.RUnlock()
-
-	if newForceReconnectClient != nil {
-		if !newForceReconnectClient.IsConnected() {
-			return fmt.Errorf("failed to connect")
-		}
-
-		if !newForceReconnectClient.IsLoggedIn() {
-			return fmt.Errorf("failed to login")
-		}
-	} else {
-		return fmt.Errorf("failed to connect")
-	}
-
-	return nil
+	return i.whatsmeowService.ReconnectClient(instanceId)
 }
 
 func (i instances) GetInstanceByToken(token string) (*instance_model.Instance, error) {
