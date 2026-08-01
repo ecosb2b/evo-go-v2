@@ -55,6 +55,7 @@ type WhatsmeowService interface {
 	ConnectOnStartup(clientName string)
 	StartInstance(instanceId string) error
 	ReconnectClient(instanceId string) error
+	ScheduleReconnect(instanceId string)
 	ClearInstanceCache(instanceId string, token string) error
 	CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte)
 	SendToGlobalQueues(event string, jsonData []byte, userId string)
@@ -97,6 +98,11 @@ type whatsmeowService struct {
 	natsProducer       producer_interfaces.Producer
 	loggerWrapper      *logger_wrapper.LoggerManager
 	passkeyCeremony    *ceremony.Store
+	lifecycleMu        sync.Mutex
+	runtimeSequence    uint64
+	runtimes           map[string]*instanceRuntime
+	reconnectMu        sync.Mutex
+	reconnects         map[string]*reconnectRuntime
 }
 
 type MyClient struct {
@@ -171,74 +177,19 @@ type ProxyConfig struct {
 	Username string `json:"username"`
 }
 
-func (w whatsmeowService) ReconnectClient(instanceId string) error {
-	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Starting reconnection process - simulating restart", instanceId)
-
-	// Passo 1: Limpar conexão existente se houver
-	if client, exists := w.clientPointer[instanceId]; exists {
-		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Disconnecting existing client", instanceId)
-
-		// Desconectar o cliente WebSocket
-		if client.IsConnected() {
-			client.Disconnect()
-			w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] WebSocket disconnected", instanceId)
-		}
-
-		// Remover event handler se existir
-		if mycli, ok := w.myClientPointer[instanceId]; ok {
-			if mycli.eventHandlerID != 0 {
-				client.RemoveEventHandler(mycli.eventHandlerID)
-				w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Event handler removed", instanceId)
-			}
-		}
+func (w *whatsmeowService) ReconnectClient(instanceId string) error {
+	_, ok := w.beginReconnect(instanceId)
+	if !ok {
+		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Reconnection already in progress", instanceId)
+		return nil
 	}
 
-	// Passo 2: Limpar todos os recursos da instância
-	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Cleaning up resources", instanceId)
-
-	// Enviar sinal de kill se o canal existir
-	if killChan, exists := w.killChannel[instanceId]; exists {
-		select {
-		case killChan <- true:
-			w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Kill signal sent", instanceId)
-		default:
-			// Canal pode estar bloqueado, continua
-		}
-	}
-
-	// Remover das estruturas
-	delete(w.clientPointer, instanceId)
-	delete(w.myClientPointer, instanceId)
-	delete(w.killChannel, instanceId)
-
-	// Limpar cache de userInfo para esta instância
-	if instance, err := w.instanceRepository.GetInstanceByID(instanceId); err == nil {
-		w.userInfoCache.Delete(instance.Token)
-		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] UserInfo cache cleared for token: %s", instanceId, instance.Token)
-	}
-
-	// Passo 3: Atualizar status no banco
-	instance, err := w.instanceRepository.GetInstanceByID(instanceId)
-	if err != nil {
-		return fmt.Errorf("failed to get instance: %v", err)
-	}
-
-	instance.Connected = false
-	instance.DisconnectReason = "Reconnecting"
-	err = w.instanceRepository.UpdateConnected(instanceId, false, "Reconnecting")
-	if err != nil {
-		w.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] Failed to update disconnect status: %v", instanceId, err)
-	}
-
-	// Passo 4: Aguardar um pouco para garantir limpeza completa
-	time.Sleep(2 * time.Second)
-
-	// Passo 5: Iniciar nova instância como se fosse a primeira vez
-	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Starting fresh instance", instanceId)
-	return w.StartInstance(instanceId)
+	err := w.restartInstance(instanceId)
+	w.finishReconnect(instanceId, err == nil)
+	return err
 }
 
-func (w whatsmeowService) ForceUpdateJid(instanceId string, number string) error {
+func (w *whatsmeowService) ForceUpdateJid(instanceId string, number string) error {
 	instance, err := w.instanceRepository.GetInstanceByID(instanceId)
 	if err != nil {
 		w.loggerWrapper.GetLogger(instanceId).LogError("[%s] Error getting instance: %v", instanceId, err)
@@ -313,7 +264,7 @@ var (
 	sharedAuthContainerMu sync.Mutex
 )
 
-func (w whatsmeowService) getAuthContainer() (*sqlstore.Container, error) {
+func (w *whatsmeowService) getAuthContainer() (*sqlstore.Container, error) {
 	sharedAuthContainerMu.Lock()
 	defer sharedAuthContainerMu.Unlock()
 
@@ -353,15 +304,53 @@ func (w whatsmeowService) getAuthContainer() (*sqlstore.Container, error) {
 	return sharedAuthContainer, nil
 }
 
-func (w whatsmeowService) StartClient(cd *ClientData) {
+func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 	w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Starting websocket connection to Whatsapp for user '%s'", cd.Instance.Id)
+	runtimeToken, _, reserved := w.reserveRuntime(cd.Instance.Id)
+	if !reserved {
+		w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Client runtime already starting or running", cd.Instance.Id)
+		return
+	}
+	killChan := make(chan bool, 1)
+	ClientMapsMu.Lock()
+	w.killChannel[cd.Instance.Id] = killChan
+	ClientMapsMu.Unlock()
+
+	var client *whatsmeow.Client
+	var mycli *MyClient
+	defer func() {
+		if client != nil {
+			if mycli != nil && mycli.eventHandlerID != 0 {
+				client.RemoveEventHandler(mycli.eventHandlerID)
+			}
+			if client.IsConnected() {
+				client.Disconnect()
+			}
+		}
+		ClientMapsMu.Lock()
+		if w.clientPointer[cd.Instance.Id] == client {
+			delete(w.clientPointer, cd.Instance.Id)
+		}
+		if w.myClientPointer[cd.Instance.Id] == mycli {
+			delete(w.myClientPointer, cd.Instance.Id)
+		}
+		if w.killChannel[cd.Instance.Id] == killChan {
+			delete(w.killChannel, cd.Instance.Id)
+		}
+		ClientMapsMu.Unlock()
+		w.finishRuntime(cd.Instance.Id, runtimeToken)
+	}()
 
 	var deviceStore *store.Device
 	var err error
 
-	if w.clientPointer[cd.Instance.Id] != nil {
-		if w.clientPointer[cd.Instance.Id].IsConnected() {
+	ClientMapsMu.RLock()
+	existingClient := w.clientPointer[cd.Instance.Id]
+	ClientMapsMu.RUnlock()
+
+	if existingClient != nil {
+		if existingClient.IsConnected() {
 			return
 		}
 	}
@@ -445,7 +434,7 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 		minLevel = "INFO" // Nível mínimo para garantir que logs INFO apareçam
 	}
 	clientLog := waLog.Stdout("Client", minLevel, true)
-	client := whatsmeow.NewClient(deviceStore, clientLog)
+	client = whatsmeow.NewClient(deviceStore, clientLog)
 
 	// FIX (2026-07-15, revisado): SendReportingTokens DESLIGADO. Payload de botão
 	// cta_copy capturado via BTN-DEBUG que renderiza no celular NÃO carrega
@@ -457,7 +446,9 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	// do EvoGO até 0.7.2).
 	client.SendReportingTokens = false
 
+	ClientMapsMu.Lock()
 	w.clientPointer[cd.Instance.Id] = client
+	ClientMapsMu.Unlock()
 
 	if cd.IsProxy {
 		var proxyConfig ProxyConfig
@@ -509,8 +500,8 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	client.EnableAutoReconnect = false
 	client.AutoTrustIdentity = true
 
-	mycli := &MyClient{
-		service:            &w,
+	mycli = &MyClient{
+		service:            w,
 		Instance:           cd.Instance,
 		WAClient:           client,
 		eventHandlerID:     1,
@@ -545,7 +536,9 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	mycli.eventHandlerID = mycli.WAClient.AddEventHandler(mycli.myEventHandler)
 
 	// Armazena o MyClient no map para permitir atualizações posteriores
+	ClientMapsMu.Lock()
 	w.myClientPointer[cd.Instance.Id] = mycli
+	ClientMapsMu.Unlock()
 
 	if client.Store.ID != nil {
 		w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Already logged in with JID: %s", cd.Instance.Id, client.Store.ID.String())
@@ -618,13 +611,24 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 	// Removed auto-reconnect logic to prevent infinite loops
 
 	for {
+		// [Athene/PR#127] Relê o kill channel do map compartilhado a cada iteração
+		// (pode ser substituído por um ReconnectClient/StartInstance concorrente da
+		// mesma instância): copia sob RLock, libera, e faz o select na cópia local.
+		// Entrada ausente vira canal nil, que nunca dispara — igual ao acesso
+		// original sem lock.
+		ClientMapsMu.RLock()
+		killChan := w.killChannel[cd.Instance.Id]
+		ClientMapsMu.RUnlock()
+
 		select {
-		case <-w.killChannel[cd.Instance.Id]:
+		case <-killChan:
 			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Received kill signal for user '%s'", cd.Instance.Id)
 			client.Disconnect()
 
+			ClientMapsMu.Lock()
 			delete(w.clientPointer, cd.Instance.Id)
 			delete(w.myClientPointer, cd.Instance.Id)
+			ClientMapsMu.Unlock()
 
 			// Limpar cache de userInfo para esta instância
 			w.userInfoCache.Delete(cd.Instance.Token)
@@ -669,12 +673,7 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 				go mycli.service.SendToGlobalQueues(postMap["event"].(string), values, mycli.userID)
 			}
 
-			// restart client
-			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Restarting client", cd.Instance.Id)
-			w.StartClient(cd)
 			return
-		default:
-			time.Sleep(1000 * time.Millisecond)
 		}
 	}
 }
@@ -684,6 +683,11 @@ func schedulePresenceUpdates(mycli *MyClient) {
 	defer ticker.Stop()
 
 	for {
+		// [Athene/PR#127] Copia o kill channel do map sob RLock antes do select.
+		ClientMapsMu.RLock()
+		killChan := mycli.killChannel[mycli.userID]
+		ClientMapsMu.RUnlock()
+
 		select {
 		case <-ticker.C:
 			// Verificar se a instância ainda existe
@@ -699,7 +703,7 @@ func schedulePresenceUpdates(mycli *MyClient) {
 			randomInterval := time.Duration(1+rand.Intn(3)) * time.Hour
 			ticker = time.NewTicker(randomInterval)
 
-		case <-mycli.killChannel[mycli.userID]:
+		case <-killChan:
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Received kill signal, stopping presence updates", mycli.userID)
 			return // Encerra a goroutine quando receber sinal de kill
 		}
@@ -890,11 +894,17 @@ func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 	}
 
 	// Signal StartClient's select loop to disconnect and clean up the shared
-	// maps (it is the single writer for this instance). Blocking send mirrors
-	// the original timeout branch so the signal is never dropped.
+	// maps (it is the single writer for this instance). The buffered, non-blocking
+	// signal makes concurrent teardown requests idempotent.
 	mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] QR timeout — signaling kill channel", instanceID)
-	if killChan, exists := mycli.killChannel[instanceID]; exists {
-		killChan <- true
+	ClientMapsMu.RLock()
+	killChan, exists := mycli.killChannel[instanceID]
+	ClientMapsMu.RUnlock()
+	if exists {
+		select {
+		case killChan <- true:
+		default:
+		}
 	}
 }
 
@@ -1227,6 +1237,48 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			return
 		}
 
+		// Decrypt MESSAGE_EDIT BEFORE LID/PN JID swap. whatsmeow derives the edit
+		// key from Info.Sender/Chat as received on the wire; swapping first causes
+		// cipher: message authentication failed even when the secret exists.
+		secretEditEnvelope := false
+		decryptFailed := false
+		if enc := evt.Message.GetSecretEncryptedMessage(); enc != nil &&
+			enc.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			secretEditEnvelope = true
+			evt.IsEdit = true
+
+			ClientMapsMu.RLock()
+			client := mycli.clientPointer[mycli.userID]
+			ClientMapsMu.RUnlock()
+			if client == nil {
+				client = mycli.WAClient
+			}
+			if client == nil {
+				decryptFailed = true
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn(
+					"[%s] No client available to decrypt secret encrypted message edit", mycli.userID)
+			} else {
+				decrypted, err := client.DecryptSecretEncryptedMessage(context.Background(), evt)
+				if err != nil {
+					decryptFailed = true
+					mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn(
+						"[%s] Failed to decrypt secret encrypted message edit: %v",
+						mycli.userID, err)
+				} else {
+					evt.Message = decrypted
+					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo(
+						"[%s] Decrypted secret encrypted message edit for %s", mycli.userID, evt.Info.ID)
+				}
+			}
+		}
+
+		// EditedMessage wrapper (legacy wire format or post-decrypt). Do not call
+		// UnwrapRaw here — it resets Message from RawMessage and would undo decrypt.
+		if evt.Message != nil && evt.Message.GetEditedMessage().GetMessage() != nil {
+			evt.Message = evt.Message.GetEditedMessage().GetMessage()
+			evt.IsEdit = true
+		}
+
 		// Trata o caso especial onde Sender é @lid e SenderAlt é @s.whatsapp.net
 		// Neste caso, devemos inverter: Sender e Chat devem ser @s.whatsapp.net, SenderAlt deve ser @lid
 		senderStr := evt.Info.Sender.String()
@@ -1287,6 +1339,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			return
 		}
 
+		if parsedMessageType == "edit" || secretEditEnvelope {
+			evt.IsEdit = true
+		}
+
 		if postMap["data"] != nil {
 			jsonBytes, err := json.Marshal(postMap["data"])
 			if err != nil {
@@ -1311,6 +1367,29 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			dataMap = make(map[string]interface{})
 		}
 
+		// Explicit action flags for edit/revoke — protocolMessage.type alone is a
+		// numeric enum (0 = REVOKE, 14 = MESSAGE_EDIT) and Info.Edit is opaque.
+		switch parsedMessageType {
+		case "edit":
+			dataMap["IsEdit"] = true
+			dataMap["messageType"] = "edit"
+			setProtocolMessageTypeName(dataMap, "MESSAGE_EDIT")
+		case "revoke":
+			dataMap["IsRevoke"] = true
+			dataMap["messageType"] = "revoke"
+			setProtocolMessageTypeName(dataMap, "REVOKE")
+		default:
+			// Decrypt failed or plaintext not yet classified as "edit", but envelope
+			// already identified the event as an incoming message edit.
+			if secretEditEnvelope {
+				dataMap["IsEdit"] = true
+				dataMap["messageType"] = "edit"
+			}
+		}
+		if decryptFailed {
+			dataMap["decryptFailed"] = true
+		}
+
 		referral := extractReferralFromMessage(evt.Message)
 
 		if evt.Message.GetPollUpdateMessage() != nil {
@@ -1322,7 +1401,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				fmt.Printf("[POLL DEBUG] ✅ mycli.WAClient is initialized: %s\n", mycli.WAClient.Store.ID)
 			}
 
-			decrypted, err := mycli.clientPointer[mycli.userID].DecryptPollVote(context.Background(), evt)
+			ClientMapsMu.RLock()
+			pollVoteClient := mycli.clientPointer[mycli.userID]
+			ClientMapsMu.RUnlock()
+			decrypted, err := pollVoteClient.DecryptPollVote(context.Background(), evt)
 			if err != nil {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to decrypt vote: %v", mycli.userID, err)
 			} else {
@@ -1862,12 +1944,15 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		doWebhook = true
 		postMap["event"] = "Archive"
 
-		dataMap := postMap["data"].(map[string]interface{})
-		dataMap["JID"] = evt.JID
-		dataMap["Timestamp"] = evt.Timestamp
-		dataMap["Action"] = evt.Action
-		dataMap["FromFullSync"] = evt.FromFullSync
-		postMap["data"] = dataMap
+		// [Athene/PR#125] postMap não tem a chave "data" neste ponto, então o type
+		// assertion antigo dava panic (derruba o processo inteiro) sempre que um
+		// chat era (des)arquivado no celular. Monta o mapa direto.
+		postMap["data"] = map[string]interface{}{
+			"JID":          evt.JID,
+			"Timestamp":    evt.Timestamp,
+			"Action":       evt.Action,
+			"FromFullSync": evt.FromFullSync,
+		}
 
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Chat archived", mycli.userID)
 	case *events.HistorySync:
@@ -1942,7 +2027,15 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 
 		// Agora mata o canal DEPOIS de enviar o evento
-		mycli.killChannel[mycli.userID] <- true
+		ClientMapsMu.RLock()
+		loggedOutKillChan := mycli.killChannel[mycli.userID]
+		ClientMapsMu.RUnlock()
+		if loggedOutKillChan != nil {
+			select {
+			case loggedOutKillChan <- true:
+			default:
+			}
+		}
 	case *events.ChatPresence:
 		doWebhook = true
 		postMap["event"] = "ChatPresence"
@@ -2027,12 +2120,30 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 
 		// Trigger instance restart via websocket-capable service (non-blocking)
-		go func(instanceID string) {
-			mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Disconnected detected, restarting instance", instanceID)
-			if err := mycli.service.ReconnectClient(instanceID); err != nil {
-				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
-			}
-		}(mycli.userID)
+		mycli.service.ScheduleReconnect(mycli.userID)
+	case *events.KeepAliveTimeout:
+		doWebhook = true
+		postMap["event"] = "KeepAliveTimeout"
+		postMap["data"] = map[string]interface{}{
+			"ErrorCount":  evt.ErrorCount,
+			"LastSuccess": evt.LastSuccess,
+		}
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Keepalive ping timed out (%d consecutive, last success: %s)", mycli.userID, evt.ErrorCount, evt.LastSuccess.Format(time.RFC3339))
+
+		// [Athene/PR#126] Com EnableAutoReconnect desligado, uma conexão TCP que
+		// morre em silêncio (NAT timeout, queda de rede) fica "zumbi": o keepalive
+		// expira pra sempre sem nunca emitir events.Disconnected — a instância
+		// segue "conectada" mas não envia nem recebe. Após 3 timeouts seguidos,
+		// reinicia pelo mesmo caminho não-bloqueante do handler de Disconnected.
+		// O match exato (== 3) evita empilhar restarts com 4, 5, ... enquanto um
+		// já está em andamento.
+		if evt.ErrorCount == 3 {
+			mycli.service.ScheduleReconnect(mycli.userID)
+		}
+	case *events.KeepAliveRestored:
+		doWebhook = true
+		postMap["event"] = "KeepAliveRestored"
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Keepalive pings restored", mycli.userID)
 	case *events.LabelEdit:
 		doWebhook = true
 		postMap["event"] = "LabelEdit"
@@ -2267,7 +2378,7 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 		if contains(subscriptions, "CONNECTION") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
@@ -2365,7 +2476,7 @@ func (w *whatsmeowService) sendToQueueOrWebhook(instance *instance_model.Instanc
 	}
 }
 
-func (w whatsmeowService) StartInstance(instanceId string) error {
+func (w *whatsmeowService) StartInstance(instanceId string) error {
 	instance, err := w.instanceRepository.GetInstanceByID(instanceId)
 	if err != nil {
 		return err
@@ -2427,8 +2538,6 @@ func (w whatsmeowService) StartInstance(instanceId string) error {
 		}
 	}
 
-	w.killChannel[instance.Id] = make(chan bool)
-
 	clientData := &ClientData{
 		Instance:      instance,
 		Subscriptions: subscribedEvents,
@@ -2454,7 +2563,7 @@ func (w whatsmeowService) StartInstance(instanceId string) error {
 	return nil
 }
 
-func (w whatsmeowService) ConnectOnStartup(clientName string) {
+func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 	w.loggerWrapper.GetLogger(clientName).LogInfo("Connecting all instances on startup")
 	var instances []*instance_model.Instance
 	var err error
@@ -2555,7 +2664,7 @@ func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, 
 				globalEventType = "CHAT_PRESENCE"
 			case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
 				globalEventType = "CALL"
-			case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+			case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 				globalEventType = "CONNECTION"
 			case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
 				globalEventType = "LABEL"
@@ -2617,7 +2726,7 @@ func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, 
 			globalEventType = "CHAT_PRESENCE"
 		case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
 			globalEventType = "CALL"
-		case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected":
+		case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
 			globalEventType = "CONNECTION"
 		case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
 			globalEventType = "LABEL"
@@ -2717,7 +2826,7 @@ func fetchWhatsAppWebVersion() (*clientVersion, error) {
 	return nil, fmt.Errorf("could not find client revision in the fetched content. Content preview: %s", content)
 }
 
-func (w whatsmeowService) UpdateInstanceSettings(instanceId string) error {
+func (w *whatsmeowService) UpdateInstanceSettings(instanceId string) error {
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Updating instance settings in runtime", instanceId)
 
 	// Busca a instância atualizada do banco
@@ -2728,7 +2837,9 @@ func (w whatsmeowService) UpdateInstanceSettings(instanceId string) error {
 	}
 
 	// Verifica se o MyClient existe
+	ClientMapsMu.RLock()
 	myClient, exists := w.myClientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !exists {
 		w.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] MyClient not found in runtime, instance may not be connected", instanceId)
 		return fmt.Errorf("instance %s not found in runtime", instanceId)
@@ -2776,7 +2887,7 @@ func (w whatsmeowService) UpdateInstanceSettings(instanceId string) error {
 	return nil
 }
 
-func (w whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) error {
+func (w *whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) error {
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Updating advanced settings in runtime", instanceId)
 
 	// Busca a instância atualizada do banco
@@ -2787,7 +2898,9 @@ func (w whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) erro
 	}
 
 	// Verifica se o MyClient existe
+	ClientMapsMu.RLock()
 	myClient, exists := w.myClientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !exists {
 		w.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] MyClient not found in runtime, instance may not be connected", instanceId)
 		return fmt.Errorf("instance %s not found in runtime", instanceId)
@@ -2800,38 +2913,19 @@ func (w whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) erro
 	return nil
 }
 
-func (w whatsmeowService) ClearInstanceCache(instanceId string, token string) error {
-	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Clearing instance cache - Token: %s", instanceId, token)
-
-	// Limpar userInfoCache
+func (w *whatsmeowService) ClearInstanceCache(instanceId string, token string) error {
 	w.userInfoCache.Delete(token)
-
-	// Limpar myClientPointer se existir
-	if _, exists := w.myClientPointer[instanceId]; exists {
-		delete(w.myClientPointer, instanceId)
-		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] MyClient pointer cleared", instanceId)
+	done := w.signalRuntimeStop(instanceId)
+	if !waitRuntimeDone(done) {
+		return fmt.Errorf("timed out stopping runtime for instance %s", instanceId)
 	}
 
-	// Limpar clientPointer se existir
-	if _, exists := w.clientPointer[instanceId]; exists {
-		delete(w.clientPointer, instanceId)
-		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Client pointer cleared", instanceId)
-	}
-
-	// Limpar killChannel se existir
-	if killChan, exists := w.killChannel[instanceId]; exists {
-		select {
-		case killChan <- true:
-			// Canal recebeu o sinal
-		default:
-			// Canal pode estar bloqueado, apenas fecha
-		}
-		close(killChan)
-		delete(w.killChannel, instanceId)
-		w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Kill channel cleared", instanceId)
-	}
-
-	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance cache completely cleared", instanceId)
+	// Also clear stale entries left by a runtime that never reached StartClient.
+	ClientMapsMu.Lock()
+	delete(w.clientPointer, instanceId)
+	delete(w.myClientPointer, instanceId)
+	delete(w.killChannel, instanceId)
+	ClientMapsMu.Unlock()
 	return nil
 }
 
@@ -2876,6 +2970,8 @@ func NewWhatsmeowService(
 		natsProducer:       natsProducer,
 		loggerWrapper:      loggerWrapper,
 		passkeyCeremony:    ceremony.NewStore(),
+		runtimes:           make(map[string]*instanceRuntime),
+		reconnects:         make(map[string]*reconnectRuntime),
 	}
 }
 
@@ -2893,7 +2989,9 @@ func (w *whatsmeowService) PasskeyCeremonyStore() *ceremony.Store {
 // SubmitPasskeyResponse forwards the browser's WebAuthn assertion to WhatsApp
 // for the given instance. Called by POST /passkey-ceremony/{token}/response.
 func (w *whatsmeowService) SubmitPasskeyResponse(instanceId string, resp *types.WebAuthnResponse) error {
+	ClientMapsMu.RLock()
 	client, ok := w.clientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !ok || client == nil {
 		return fmt.Errorf("no active client for instance %s", instanceId)
 	}
@@ -2912,7 +3010,9 @@ func (w *whatsmeowService) SubmitPasskeyResponse(instanceId string, resp *types.
 // ConfirmPasskey finishes the pairing after the user verified the code.
 // Called by POST /passkey-ceremony/{token}/confirm.
 func (w *whatsmeowService) ConfirmPasskey(instanceId string) error {
+	ClientMapsMu.RLock()
 	client, ok := w.clientPointer[instanceId]
+	ClientMapsMu.RUnlock()
 	if !ok || client == nil {
 		return fmt.Errorf("no active client for instance %s", instanceId)
 	}
@@ -2924,6 +3024,22 @@ func (w *whatsmeowService) ConfirmPasskey(instanceId string) error {
 	}
 	w.passkeyCeremony.SetConfirmed(instanceId)
 	return nil
+}
+
+// setProtocolMessageTypeName adds a human-readable protocolMessage.typeName
+// (e.g. REVOKE, MESSAGE_EDIT) without replacing the numeric type enum.
+func setProtocolMessageTypeName(dataMap map[string]interface{}, typeName string) {
+	message, ok := dataMap["Message"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	pm, ok := message["protocolMessage"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	pm["typeName"] = typeName
+	message["protocolMessage"] = pm
+	dataMap["Message"] = message
 }
 
 // cleanSenderID remove a parte ":numero" do sender ID para exibir apenas o remoteJid correto

@@ -24,6 +24,7 @@ type SendHandler interface {
 	SendList(ctx *gin.Context)
 	SendCarousel(ctx *gin.Context)
 	SendProduct(ctx *gin.Context)
+	SendEvent(ctx *gin.Context)
 	SendStatusText(ctx *gin.Context)
 	SendStatusMedia(ctx *gin.Context)
 }

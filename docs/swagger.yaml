@@ -625,6 +625,72 @@ definitions:
       vcard:
         $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_utils.VCardStruct'
     type: object
+  github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventLocationStruct:
+    properties:
+      address:
+        example: Av. Principal, 1000
+        type: string
+      latitude:
+        example: -16.6869
+        type: number
+      longitude:
+        example: -49.2648
+        type: number
+      name:
+        example: Sede Grupo Mirandas
+        type: string
+    type: object
+  github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventStruct:
+    properties:
+      delay:
+        type: integer
+      description:
+        type: string
+      endTime:
+        type: string
+      extraGuestsAllowed:
+        type: boolean
+      formatJid:
+        type: boolean
+      hasReminder:
+        type: boolean
+      id:
+        type: string
+      isCanceled:
+        type: boolean
+      isScheduleCall:
+        type: boolean
+      joinLink:
+        description: Link de chamada (apenas call.whatsapp.com; links externos vão
+          em description).
+        type: string
+      location:
+        $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventLocationStruct'
+      mentionAll:
+        type: boolean
+      mentionedJid:
+        items:
+          type: string
+        type: array
+      name:
+        example: Reuniao de vendas
+        type: string
+      number:
+        example: 120363000000000000@g.us
+        type: string
+      quoted:
+        $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.QuotedStruct'
+      reminderOffsetSec:
+        type: integer
+      startTime:
+        example: "2026-06-25T20:00:00-03:00"
+        type: string
+      text:
+        description: |-
+          Texto opcional enviado ANTES do card do evento (funciona como legenda; o
+          evento não tem campo de legenda). Respeita mentionAll/mentionedJid/delay.
+        type: string
+    type: object
   github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.LinkStruct:
     properties:
       delay:
@@ -1163,6 +1229,8 @@ definitions:
         type: boolean
       isGroup:
         description: Whether the chat is a group chat or broadcast list.
+        type: boolean
+      isNewsletterStatus:
         type: boolean
       mediaType:
         type: string
@@ -2029,6 +2097,7 @@ definitions:
     - 54
     - 55
     - 56
+    - 57
     type: integer
     x-enum-varnames:
     - BotMetricsEntryPoint_UNDEFINED_ENTRY_POINT
@@ -2079,6 +2148,7 @@ definitions:
     - BotMetricsEntryPoint_GROUP_MEMBER
     - BotMetricsEntryPoint_CHATLIST_SEARCH
     - BotMetricsEntryPoint_NEW_CHAT_LIST
+    - BotMetricsEntryPoint_CONTACTS_TAB
   waAICommon.BotMetricsMetadata:
     properties:
       destinationEntryPoint:
@@ -3301,6 +3371,8 @@ definitions:
         items:
           type: integer
         type: array
+      callReason:
+        type: string
       contextInfo:
         $ref: '#/definitions/waE2E.ContextInfo'
       conversionData:
@@ -6520,6 +6592,8 @@ definitions:
         $ref: '#/definitions/waE2E.PeerDataOperationRequestResponseMessage'
       requestWelcomeMessageMetadata:
         $ref: '#/definitions/waE2E.RequestWelcomeMessageMetadata'
+      syncRequestMutationRetry:
+        $ref: '#/definitions/waE2E.SyncRequestMutationRetry'
       timestampMS:
         type: integer
       type:
@@ -6559,6 +6633,7 @@ definitions:
     - 35
     - 36
     - 37
+    - 38
     type: integer
     x-enum-varnames:
     - ProtocolMessage_REVOKE
@@ -6593,6 +6668,7 @@ definitions:
     - ProtocolMessage_AI_METADATA_OPERATION
     - ProtocolMessage_MARK_AS_VERIFIED_ACTION
     - ProtocolMessage_COEX_STATE_SYNC
+    - ProtocolMessage_SYNC_REQUEST_MUTATION_RETRY
   waE2E.QuestionResponseMessage:
     properties:
       key:
@@ -7012,6 +7088,22 @@ definitions:
         type: integer
       rmrSource:
         type: string
+    type: object
+  waE2E.SyncRequestMutationRetry:
+    properties:
+      collections:
+        items:
+          $ref: '#/definitions/waE2E.SyncRequestMutationRetry_Collection'
+        type: array
+      count:
+        type: integer
+    type: object
+  waE2E.SyncRequestMutationRetry_Collection:
+    properties:
+      name:
+        type: string
+      storedSyncdVersion:
+        type: integer
     type: object
   waE2E.TemplateButtonReplyMessage:
     properties:
@@ -9406,6 +9498,39 @@ paths:
       summary: Send a contact message
       tags:
       - Send Message
+  /send/event:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Cria e envia um Evento/agenda do WhatsApp. `startTime`/`endTime` aceitam
+        ISO 8601 (RFC3339) com timezone ou epoch em segundos. Normalmente enviado
+        a um JID de grupo, ex.: 1203...@g.us.
+      parameters:
+      - description: Event data
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_evolution-foundation_evolution-go_pkg_sendMessage_service.EventStruct'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: success
+          schema:
+            $ref: '#/definitions/gin.H'
+        "400":
+          description: Error on validation
+          schema:
+            $ref: '#/definitions/gin.H'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+      summary: Send a WhatsApp event message
+      tags:
+      - Send Message
   /send/link:
     post:
       consumes:
@@ -9817,8 +9942,16 @@ paths:
           description: Error on validation
           schema:
             $ref: '#/definitions/gin.H'
+        "429":
+          description: WhatsApp rate limit
+          schema:
+            $ref: '#/definitions/gin.H'
         "500":
           description: Internal server error
+          schema:
+            $ref: '#/definitions/gin.H'
+        "504":
+          description: WhatsApp query timeout
           schema:
             $ref: '#/definitions/gin.H'
       summary: Get a user's avatar

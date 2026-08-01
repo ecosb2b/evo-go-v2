@@ -128,6 +128,8 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/poll", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendPoll)
 			routes.POST("/sticker", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendSticker)
 			routes.POST("/location", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendLocation)
+			// [Athene] Evento/agenda do WhatsApp (PR #90)
+			routes.POST("/event", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendEvent)
 			routes.POST("/contact", r.jidValidationMiddleware.ValidateContactFields(), r.sendHandler.SendContact) // TODO: send multiple contacts
 			routes.POST("/button", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendButton)
 			routes.POST("/list", r.jidValidationMiddleware.ValidateNumberFieldWithFormatJid(), r.sendHandler.SendList)
@@ -206,8 +208,8 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/name", r.jidValidationMiddleware.ValidateNumberField(), r.groupHandler.SetGroupName)
 			routes.POST("/description", r.jidValidationMiddleware.ValidateNumberField(), r.groupHandler.SetGroupDescription)
 			routes.POST("/create", r.jidValidationMiddleware.ValidateMultipleNumbers("participants"), r.groupHandler.CreateGroup)
-			routes.POST("/participant", r.jidValidationMiddleware.ValidateJIDFields("number", "participants"), r.groupHandler.UpdateParticipant)
-			routes.GET("/myall", r.groupHandler.GetMyGroups) // TODO: not working
+			routes.POST("/participant", r.jidValidationMiddleware.ValidateMultipleNumbers("participants"), r.groupHandler.UpdateParticipant)
+			routes.GET("/myall", r.groupHandler.GetMyGroups)
 			routes.POST("/join", r.groupHandler.JoinGroupLink)
 			routes.POST("/leave", r.jidValidationMiddleware.ValidateNumberField(), r.groupHandler.LeaveGroup)
 			routes.POST("/settings", r.jidValidationMiddleware.ValidateNumberField(), r.groupHandler.UpdateGroupSettings)

@@ -186,6 +186,18 @@ minificado). O `?embed=1` esconde o cabeçalho próprio do dashboard pra ficar n
 Se o EvolutionGO mudar o texto do placeholder ou publicar um novo `manager/dist`,
 reaplicar o script e/ou ajustar a `PHRASE`.
 
+**Seção "Salvar contato" no modal de teste:** o `index.html` também injeta (via
+segundo `<script>`) um bloco `POST /user/savecontact` dentro do modal "Testar
+mensagens" do manager (aberto pelo ícone de frasco no card da instância). Detecta
+o modal pelo `<h2>` "Testar mensagens", insere o bloco acima do rodapé e usa o campo
+"Número de destino" já existente como contato. A **apikey da instância é detectada
+automaticamente**: um patch em `window.fetch` captura o `token` de cada instância do
+`/instance/all` (e o header `apikey` das chamadas `/send`/`/user`); o token certo é
+escolhido pelo nome da instância no título do modal. Faz `fetch('/user/savecontact')`
+same-origin.
+Não toca no React minificado — se o SPA re-renderizar o modal, o MutationObserver
+reinjeta. Ao publicar novo `manager/dist`, reaplicar.
+
 ### Fase 2 — endpoint `GET /server/stats` (métricas de sistema + mensagens)
 
 **Arquivos:**
@@ -311,6 +323,59 @@ Header: apikey: <token da instância>
 **Fluxo de uso:** os produtos são criados/gerenciados no **app oficial** ou no
 **Meta Commerce Manager** (que sincroniza com o catálogo da conta); a API só dispara
 o card na conversa, informando o `productId` do catálogo.
+
+---
+
+## 8. Múltiplos webhooks por instância — fan-out
+
+**Arquivo:** `pkg/events/webhook/webhook_producer.go` (`Produce`, `splitWebhookURLs`)
+
+O modelo `Instance` continua com **um único** campo `Webhook string` (sem migração
+de banco). A mudança está só no producer: `Produce` agora chama `splitWebhookURLs`,
+que quebra a string em **N URLs** e envia a **mesma** requisição para cada uma
+(cada uma com seu próprio retry). É 100% retrocompatível — uma única URL continua
+funcionando igual.
+
+Formatos aceitos no campo `Webhook`:
+- lista separada por **quebra de linha**, vírgula ou ponto-e-vírgula
+  (ex.: `https://a/webhook\nhttps://b/webhook`);
+- array JSON (`["https://a/webhook","https://b/webhook"]`).
+
+Duplicatas, entradas vazias e o marcador `disabled` são ignorados. O endpoint que
+grava (`POST /instance/connect`, campo `webhookUrl`) não mudou — o manager só passa
+a mandar as URLs juntadas por `\n`. O webhook global (`config.WebhookUrl`) segue
+sendo enviado em paralelo, como antes.
+
+**UI:** ver seção 9.
+
+---
+
+## 9. Página de Configurações da instância no manager — Proxy + Webhooks
+
+**Arquivo:** `manager/dist/index.html` (3º bloco `<script>` injetado, via DOM —
+o manager é build React compilado, então não tocamos no JS minificado).
+
+Roda na rota `/manager/instances/{id}/settings`. Chave admin (apikey global) e
+`apiUrl` vêm de `localStorage["evolution-auth"].state`. O `instanceId` sai da URL.
+
+**(1) Card "Configurações de Proxy"** — injetado logo acima do card de webhook
+(clona o `className` do card existente para manter a aparência). Lê o proxy atual
+de `GET /instance/info/{id}` (campo `proxy`, um JSON `{protocol,host,port,username,
+password}`), permite definir (`POST /instance/proxy/{id}`) e remover
+(`DELETE /instance/proxy/{id}`). Campos: host, porta, protocolo (http/https/socks5),
+usuário e senha (opcionais). Setar/remover já dispara reconexão no backend.
+
+**(2) Múltiplos webhooks** — o campo único "URL do Webhook" é escondido e
+substituído por uma lista de N inputs (adicionar/remover). A cada edição, o valor
+das linhas é juntado por `\n` e **escrito de volta no input controlado do React**
+(via o setter nativo de `value` + disparo do evento `input`), de modo que o botão
+**"Salvar Webhook" original** (que já manda `webhookUrl` + eventos + integrações
+para `/instance/connect`) continua sendo a única fonte de gravação. O backend faz o
+fan-out (seção 8). Não há `sync()` inicial — o valor vindo do React não é
+sobrescrito até o usuário editar.
+
+**Rebuild:** ambos exigem novo build da imagem (o `manager/dist` é copiado no
+Docker) + deploy no Dokploy, além do backend recompilado por causa da seção 8.
 
 ---
 
