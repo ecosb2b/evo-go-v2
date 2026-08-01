@@ -481,6 +481,9 @@ func (m *messageService) DeleteMessageEveryone(data *MessageStruct, instance *in
 		m.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error validating message fields", instance.Id)
 		return "", "", errors.New("invalid phone number")
 	}
+	// The chat JID is embedded in the revoke protocol message key. A leading
+	// "+" makes receiving devices look up a different chat and ignore it.
+	recipient = utils.CanonicalJID(recipient)
 
 	m.loggerWrapper.GetLogger(instance.Id).LogInfo("Revoking message %s from %s", data.MessageID, recipient)
 
@@ -509,6 +512,9 @@ func (m *messageService) EditMessage(data *EditMessageStruct, instance *instance
 		m.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error validating message fields", instance.Id)
 		return "", "", errors.New("invalid phone number")
 	}
+	// BuildEdit also embeds the JID in a protocol message key, so it needs the
+	// same canonical form used by revoke, reactions and receipts.
+	recipient = utils.CanonicalJID(recipient)
 
 	resp, err := client.SendMessage(
 		context.Background(),

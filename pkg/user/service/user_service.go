@@ -21,10 +21,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// avatarRequestTimeout bounds POST /user/avatar so clients (e.g. Chatwoot at 12s)
+// get a clear HTTP error instead of a hung connection waiting for the ~75s IQ default.
+const avatarRequestTimeout = 8 * time.Second
+
+// clientReadyWait is the max time to wait after StartInstance before failing.
+const clientReadyWait = 2 * time.Second
+
 type UserService interface {
 	GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error)
 	CheckUser(data *CheckUserStruct, instance *instance_model.Instance) (*CheckUserCollection, error)
-	GetAvatar(data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error)
+	GetAvatar(ctx context.Context, data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error)
 	GetContacts(instance *instance_model.Instance) ([]ContactInfo, error)
 	SaveContact(data *SaveContactStruct, instance *instance_model.Instance) error
 	CreateProduct(data *ProductCreateStruct, instance *instance_model.Instance) (map[string]any, error)
@@ -131,6 +138,14 @@ type PrivacyStruct struct {
 }
 
 func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
+	return u.ensureClientConnectedCtx(context.Background(), instanceId)
+}
+
+func (u *userService) ensureClientConnectedCtx(ctx context.Context, instanceId string) (*whatsmeow.Client, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	whatsmeow_service.ClientMapsMu.RLock()
 	client := u.clientPointer[instanceId]
 	whatsmeow_service.ClientMapsMu.RUnlock()
@@ -144,22 +159,10 @@ func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 			return nil, errors.New("no active session found")
 		}
 
-		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
-		time.Sleep(2 * time.Second)
-
-		whatsmeow_service.ClientMapsMu.RLock()
-		client = u.clientPointer[instanceId]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
-			instanceId,
-			client != nil,
-			client != nil && client.IsConnected())
-
-		if client == nil || !client.IsConnected() {
-			u.loggerWrapper.GetLogger(instanceId).LogError("[%s] New client validation failed - Exists: %v, Connected: %v",
-				instanceId,
-				client != nil,
-				client != nil && client.IsConnected())
+		u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting up to %s for connection...", instanceId, clientReadyWait)
+		client, err = u.waitForClientReady(ctx, instanceId, clientReadyWait)
+		if err != nil {
+			u.loggerWrapper.GetLogger(instanceId).LogError("[%s] New client validation failed: %v", instanceId, err)
 			return nil, errors.New("no active session found")
 		}
 	} else if !client.IsConnected() {
@@ -171,6 +174,29 @@ func (u *userService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 
 	u.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Client successfully validated - Connected: %v", instanceId, client.IsConnected())
 	return client, nil
+}
+
+func (u *userService) waitForClientReady(ctx context.Context, instanceId string, maxWait time.Duration) (*whatsmeow.Client, error) {
+	deadline := time.Now().Add(maxWait)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		whatsmeow_service.ClientMapsMu.RLock()
+		client := u.clientPointer[instanceId]
+		whatsmeow_service.ClientMapsMu.RUnlock()
+		if client != nil && client.IsConnected() {
+			return client, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("client not ready within wait window")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for client: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (u *userService) GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error) {
@@ -341,8 +367,12 @@ func (u *userService) mergeCheckUserResults(original, retry *CheckUserCollection
 	return merged
 }
 
-func (u *userService) GetAvatar(data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error) {
-	client, err := u.ensureClientConnected(instance.Id)
+func (u *userService) GetAvatar(ctx context.Context, data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	client, err := u.ensureClientConnectedCtx(ctx, instance.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -361,23 +391,30 @@ func (u *userService) GetAvatar(data *GetAvatarStruct, instance *instance_model.
 	if !ok {
 		return nil, errors.New("invalid phone number")
 	}
+	// Profile picture IQ is a RAW node (Target=jid). CreateJID/ParseJID may
+	// prefix "+" which WhatsApp does not accept on this path — same class of
+	// bug as typing/receipts (see utils.CanonicalJID).
+	jid = utils.CanonicalJID(jid).ToNonAD()
+	// Prefer PN JID when the store knows the mapping for @lid.
+	if jid.Server == types.HiddenUserServer && client.Store.LIDs != nil {
+		if pn, lidErr := client.Store.LIDs.GetPNForLID(ctx, jid); lidErr == nil && !pn.IsEmpty() {
+			u.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Resolved LID %s to PN %s for avatar", instance.Id, jid, pn)
+			jid = utils.CanonicalJID(pn).ToNonAD()
+		}
+	}
 
 	u.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Requesting avatar for JID: %s, Preview: %v", instance.Id, jid, data.Preview)
 
-	var pic *types.ProfilePictureInfo
-
-	// 🔒 FIX: Adicionar timeout ao contexto para evitar que a requisição trave indefinidamente
-	// Usar timeout maior que o padrão do sendIQ (75s) para dar tempo suficiente
-	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, avatarRequestTimeout)
 	defer cancel()
 
 	u.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Starting GetProfilePictureInfo request...", instance.Id)
-	pic, err = client.GetProfilePictureInfo(ctx, jid, &whatsmeow.GetProfilePictureParams{
+	pic, err := client.GetProfilePictureInfo(reqCtx, jid, &whatsmeow.GetProfilePictureParams{
 		Preview: data.Preview,
 	})
 	if err != nil {
 		u.loggerWrapper.GetLogger(instance.Id).LogError("[%s] GetProfilePictureInfo failed: %v", instance.Id, err)
-		return nil, err
+		return nil, fmt.Errorf("get profile picture for %s: %w", jid, err)
 	}
 
 	if pic == nil {

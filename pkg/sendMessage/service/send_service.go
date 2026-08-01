@@ -14,6 +14,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -1608,40 +1609,114 @@ func convertToWebP(imageData string) ([]byte, error) {
 	return webpBuffer.Bytes(), nil
 }
 
+// convertBytesToWebP re-encodes a STATIC image (jpeg/png/...) already in memory into WebP. Never
+// call with data that is already WebP — the decoder fails on animated WebP ("webpDecodeRGBA: failed")
+// and would flatten a static WebP to a single frame anyway.
+func convertBytesToWebP(data []byte) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %v", err)
+	}
+	var webpBuffer bytes.Buffer
+	if err := webp.Encode(&webpBuffer, img, &webp.Options{Lossless: false, Quality: 80}); err != nil {
+		return nil, fmt.Errorf("failed to encode image to WebP: %v", err)
+	}
+	return webpBuffer.Bytes(), nil
+}
+
+// isWebP checks the RIFF/WEBP magic bytes.
+func isWebP(data []byte) bool {
+	return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+}
+
+// isAnimatedWebP: an animated WebP carries a VP8X chunk (right after the 12-byte RIFF header) with
+// the Animation flag (bit 0x02) set; the ANIM chunk scan is a belt-and-suspenders fallback.
+func isAnimatedWebP(data []byte) bool {
+	if !isWebP(data) {
+		return false
+	}
+	if len(data) >= 21 && bytes.Equal(data[12:16], []byte("VP8X")) && data[20]&0x02 != 0 {
+		return true
+	}
+	return bytes.Contains(data, []byte("ANIM"))
+}
+
+const stickerDownloadMaxBytes = 16 << 20 // 16 MiB
+
+var stickerHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+func fetchStickerData(ctx context.Context, rawURL string) ([]byte, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid sticker URL")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sticker request: %w", err)
+	}
+	resp, err := stickerHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch sticker from URL: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("failed to fetch sticker from URL: HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, stickerDownloadMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sticker data: %w", err)
+	}
+	if len(data) > stickerDownloadMaxBytes {
+		return nil, fmt.Errorf("sticker exceeds %d byte download limit", stickerDownloadMaxBytes)
+	}
+	return data, nil
+}
+
 func (s *sendService) SendSticker(data *StickerStruct, instance *instance_model.Instance) (*MessageSendStruct, error) {
 	client, err := s.ensureClientConnected(instance.Id)
 	if err != nil {
 		return nil, err
 	}
 
-	var uploaded whatsmeow.UploadResponse
-	var filedata []byte
+	raw, err := fetchStickerData(context.Background(), data.Sticker)
+	if err != nil {
+		return nil, err
+	}
 
-	if strings.HasPrefix(data.Sticker, "http") {
-		webpData, err := convertToWebP(data.Sticker)
+	// Stickers on WhatsApp are already WebP: upload UNTOUCHED (re-encoding both fails on animated
+	// WebP and would flatten it to one frame). Only convert when the source is some other format.
+	var filedata []byte
+	isAnimated := false
+	if isWebP(raw) {
+		filedata = raw
+		isAnimated = isAnimatedWebP(raw)
+	} else {
+		filedata, err = convertBytesToWebP(raw)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert image to WebP: %v", err)
 		}
-
-		filedata = webpData
-
-		uploaded, err = client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
-		if err != nil {
-			return nil, fmt.Errorf("failed to upload sticker: %v", err)
-		}
-	} else {
-		return nil, fmt.Errorf("invalid sticker URL")
 	}
 
-	msg := &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+	uploaded, err := client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload sticker: %v", err)
+	}
+
+	stickerMsg := &waE2E.StickerMessage{
 		URL:           proto.String(uploaded.URL),
 		DirectPath:    proto.String(uploaded.DirectPath),
 		MediaKey:      uploaded.MediaKey,
-		Mimetype:      proto.String(http.DetectContentType(filedata)),
+		Mimetype:      proto.String("image/webp"), // output is always webp now
 		FileEncSHA256: uploaded.FileEncSHA256,
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(filedata))),
-	}}
+	}
+	if isAnimated {
+		stickerMsg.IsAnimated = proto.Bool(true)
+	}
+	msg := &waE2E.Message{StickerMessage: stickerMsg}
 
 	message, err := s.SendMessage(instance, msg, "StickerMessage", &SendDataStruct{
 		Id:           data.Id,
@@ -2676,127 +2751,13 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 
 			var mentionedJIDs []string
 			for _, participant := range groupInfo.Participants {
-				mentionedJIDs = append(mentionedJIDs, participant.JID.String())
+				mentionedJIDs = append(mentionedJIDs, participantMentionJID(participant))
 			}
-
-			switch messageType {
-			case "ExtendedTextMessage":
-				if msg.ExtendedTextMessage.ContextInfo == nil {
-					msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ExtendedTextMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "ImageMessage":
-				if msg.ImageMessage.ContextInfo == nil {
-					msg.ImageMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ImageMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "VideoMessage":
-				if msg.VideoMessage.ContextInfo == nil {
-					msg.VideoMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.VideoMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "PtvMessage":
-				if msg.PtvMessage.ContextInfo == nil {
-					msg.PtvMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PtvMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "AudioMessage":
-				if msg.AudioMessage.ContextInfo == nil {
-					msg.AudioMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.AudioMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "DocumentMessage":
-				if msg.DocumentMessage.ContextInfo == nil {
-					msg.DocumentMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.DocumentMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "PollCreationMessage":
-				if msg.PollCreationMessage.ContextInfo == nil {
-					msg.PollCreationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PollCreationMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "StickerMessage":
-				if msg.StickerMessage.ContextInfo == nil {
-					msg.StickerMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.StickerMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "LocationMessage":
-				if msg.LocationMessage.ContextInfo == nil {
-					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.LocationMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "EventMessage":
-				if msg.EventMessage.ContextInfo == nil {
-					msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.EventMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "ContactMessage":
-				if msg.ContactMessage.ContextInfo == nil {
-					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ContactMessage.ContextInfo.MentionedJID = mentionedJIDs
-			}
-
+			setMessageMentionedJIDs(msg, messageType, mentionedJIDs)
 		}
 
 		if len(data.MentionedJID) > 0 {
-			switch messageType {
-			case "ExtendedTextMessage":
-				if msg.ExtendedTextMessage.ContextInfo == nil {
-					msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ExtendedTextMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "ImageMessage":
-				if msg.ImageMessage.ContextInfo == nil {
-					msg.ImageMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ImageMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "VideoMessage":
-				if msg.VideoMessage.ContextInfo == nil {
-					msg.VideoMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.VideoMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "PtvMessage":
-				if msg.PtvMessage.ContextInfo == nil {
-					msg.PtvMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PtvMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "AudioMessage":
-				if msg.AudioMessage.ContextInfo == nil {
-					msg.AudioMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.AudioMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "DocumentMessage":
-				if msg.DocumentMessage.ContextInfo == nil {
-					msg.DocumentMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.DocumentMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "PollCreationMessage":
-				if msg.PollCreationMessage.ContextInfo == nil {
-					msg.PollCreationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PollCreationMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "StickerMessage":
-				if msg.StickerMessage.ContextInfo == nil {
-					msg.StickerMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.StickerMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "LocationMessage":
-				if msg.LocationMessage.ContextInfo == nil {
-					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.LocationMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "EventMessage":
-				if msg.EventMessage.ContextInfo == nil {
-					msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.EventMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "ContactMessage":
-				if msg.ContactMessage.ContextInfo == nil {
-					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ContactMessage.ContextInfo.MentionedJID = data.MentionedJID
-			}
+			setMessageMentionedJIDs(msg, messageType, data.MentionedJID)
 		}
 	}
 
