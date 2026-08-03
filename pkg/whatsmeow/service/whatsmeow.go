@@ -76,6 +76,24 @@ type clientVersion struct {
 	Patch int
 }
 
+// storeContainerHolder guards the single, process-wide whatsmeow store
+// container. sqlstore.New opens a *sql.DB of its own, so building one container
+// per StartClient leaks an entire connection pool on every (re)connect — the
+// pools are never closed and their idle connections are never reaped, which
+// exhausts PostgreSQL's max_connections after enough reconnect cycles.
+//
+// The holder is allocated once in NewWhatsmeowService and shared by every copy
+// of whatsmeowService: most of its methods take a value receiver, so a sync.Once
+// stored inline would be copied on each call and would never deduplicate.
+// A mutex is used rather than sync.Once so a failed attempt is not cached: if
+// the database is briefly unreachable, the next (re)connect retries instead of
+// leaving every instance permanently unable to start until the process
+// restarts.
+type storeContainerHolder struct {
+	mu        sync.Mutex
+	container *sqlstore.Container
+}
+
 type whatsmeowService struct {
 	instanceRepository instance_repository.InstanceRepository
 	authDB             *sql.DB
@@ -97,6 +115,7 @@ type whatsmeowService struct {
 	natsProducer       producer_interfaces.Producer
 	loggerWrapper      *logger_wrapper.LoggerManager
 	passkeyCeremony    *ceremony.Store
+	storeHolder        *storeContainerHolder
 }
 
 type MyClient struct {
@@ -301,6 +320,63 @@ func (w whatsmeowService) ForceUpdateJid(instanceId string, number string) error
 	return nil
 }
 
+// storeContainer returns the shared whatsmeow store container, opening it on
+// first use. Every caller gets the same container — and therefore the same
+// connection pool — for the lifetime of the process.
+//
+// The pool is tuned explicitly here because neither sqlstore.New nor
+// sqlstore.NewWithDB touches it: they leave the database/sql defaults in place
+// (unlimited open connections, 2 idle connections, no lifetime and no idle
+// timeout, so idle connections are never reclaimed). These are the same limits
+// applied to the auth and users pools in config.go and main.go.
+//
+// NewWithDB is used instead of New so the pool is configured before the first
+// query; New would open an untuned *sql.DB internally. It also skips New's
+// implicit Upgrade, so migrations are run here — once, rather than on every
+// client (re)connect.
+func (w whatsmeowService) storeContainer() (*sqlstore.Container, error) {
+	h := w.storeHolder
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.container != nil {
+		return h.container, nil
+	}
+
+	var dbLog waLog.Logger
+	if w.config.WaDebug != "" {
+		dbLog = waLog.Stdout("Database", w.config.WaDebug, true)
+	}
+
+	dialect, dsn := "postgres", w.config.PostgresAuthDB
+	if dsn == "" {
+		dialect = "sqlite"
+		dsn = fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
+	}
+
+	db, err := sql.Open(dialect, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open whatsmeow store database: %w", err)
+	}
+
+	db.SetMaxOpenConns(25)                 // Máximo de 25 conexões abertas simultaneamente
+	db.SetMaxIdleConns(5)                  // Máximo de 5 conexões ociosas no pool
+	db.SetConnMaxLifetime(5 * time.Minute) // Reconectar após 5 minutos para evitar timeouts
+	db.SetConnMaxIdleTime(1 * time.Minute) // Fechar conexões ociosas após 1 minuto
+
+	container := sqlstore.NewWithDB(db, dialect, dbLog)
+	if err := container.Upgrade(context.Background()); err != nil {
+		// Close on failure so a retry does not leave the pool behind — the very
+		// leak this function exists to prevent.
+		_ = container.Close()
+		return nil, fmt.Errorf("failed to upgrade whatsmeow store database: %w", err)
+	}
+
+	h.container = container
+	return container, nil
+}
+
 func (w whatsmeowService) StartClient(cd *ClientData) {
 
 	w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Starting websocket connection to Whatsapp for user '%s'", cd.Instance.Id)
@@ -314,25 +390,7 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 		}
 	}
 
-	var container *sqlstore.Container
-
-	if w.config.WaDebug != "" {
-		dbLog := waLog.Stdout("Database", w.config.WaDebug, true)
-		if w.config.PostgresAuthDB != "" {
-			container, err = sqlstore.New(context.Background(), "postgres", w.config.PostgresAuthDB, dbLog)
-		} else {
-			dsn := fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
-			container, err = sqlstore.New(context.Background(), "sqlite", dsn, dbLog)
-		}
-	} else {
-		if w.config.PostgresAuthDB != "" {
-			container, err = sqlstore.New(context.Background(), "postgres", w.config.PostgresAuthDB, nil)
-		} else {
-			dsn := fmt.Sprintf("file:%s/dbdata/main.db?_pragma=foreign_keys(1)&_busy_timeout=5000&cache=shared&mode=rwc&_journal_mode=WAL", w.exPath)
-			container, err = sqlstore.New(context.Background(), "sqlite", dsn, nil)
-		}
-	}
-
+	container, err := w.storeContainer()
 	if err != nil {
 		w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Failed to create container: %v", cd.Instance.Id, err)
 		return
@@ -2831,6 +2889,7 @@ func NewWhatsmeowService(
 		natsProducer:       natsProducer,
 		loggerWrapper:      loggerWrapper,
 		passkeyCeremony:    ceremony.NewStore(),
+		storeHolder:        &storeContainerHolder{},
 	}
 }
 
