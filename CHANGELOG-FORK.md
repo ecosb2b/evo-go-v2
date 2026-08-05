@@ -15,8 +15,14 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 ## 0.7.3 — 2026-08-05
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.3`
-**Digest:** `sha256:72c7138fb66d4cb807226d079f5ac271a19ec27fbd4a2080fa4028c47d868957`
-**Commit:** `7b24690`
+**Digest:** `sha256:0f25d268f39eaf403e555492460b2887940bbd00ec47716fd9bde37b9f9e7ee0`
+**Commit:** `a6b0bae`
+
+> A 0.7.3 foi construída duas vezes. A primeira build (commit `7b24690`,
+> `sha256:72c7138f…`) foi republicada ao adicionar este changelog, porque o
+> `COPY . .` do Dockerfile faz qualquer arquivo do repositório entrar no contexto
+> de build. O digest acima é o vigente. O `paths-ignore` adicionado ao workflow
+> em `a6b0bae` impede que isso volte a acontecer com commits de documentação.
 
 Primeira release própria do fork. Adota o fork
 [samuelpc7/evolution-go](https://github.com/samuelpc7/evolution-go) e fecha os
