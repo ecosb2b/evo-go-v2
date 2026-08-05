@@ -519,7 +519,35 @@ func (w whatsmeowService) StartClient(cd *ClientData) {
 		}
 	}
 
-	client.EnableAutoReconnect = false
+	// ------------------------------------------------------------------
+	// ALTERADO: a linha original era `client.EnableAutoReconnect = false`
+	// (commit inicial 877eef7, 2026-03-25, nunca revisitada).
+	//
+	// POR QUE ESTAVA ASSIM: junto com o comentário "Removed auto-reconnect
+	// logic to prevent infinite loops", mais abaixo nesta mesma função, a
+	// flag foi desligada para conter loops de reconexão infinitos.
+	//
+	// QUAL ERA O PROBLEMA: desligar a flag não removia a causa do loop —
+	// removia o amortecedor. No whatsmeow, onDisconnect dispara duas coisas
+	// juntas e independentes:
+	//
+	//     go cli.dispatchEvent(&events.Disconnected{})
+	//     go cli.autoReconnect(ctx)
+	//
+	// e autoReconnect() começa com `if !cli.EnableAutoReconnect { return }`.
+	// Ou seja: com a flag em false o evento continuava chegando normalmente,
+	// mas a reconexão do whatsmeow — que tem backoff exponencial
+	// (AutoReconnectErrors * 2s) e reusa o MESMO client — nunca acontecia.
+	// O evo então reconectava por conta própria, e aquele caminho criava dois
+	// clientes para o mesmo device a cada evento (ver o bloco comentado no
+	// handler de events.Disconnected). Dois sockets no mesmo device fazem o
+	// WhatsApp fechar um, o que gera um novo Disconnected: o loop se
+	// auto-alimentava, e sem backoff nenhum.
+	//
+	// Esse mesmo loop era o gatilho do vazamento de conexões do PostgreSQL
+	// corrigido em 22d0b59 — cada StartClient abria um pool novo.
+	// ------------------------------------------------------------------
+	client.EnableAutoReconnect = true
 	client.AutoTrustIdentity = true
 
 	mycli := &MyClient{
@@ -2039,13 +2067,54 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
 		}
 
-		// Trigger instance restart via websocket-capable service (non-blocking)
-		go func(instanceID string) {
-			mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Disconnected detected, restarting instance", instanceID)
-			if err := mycli.service.ReconnectClient(instanceID); err != nil {
-				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
-			}
-		}(mycli.userID)
+		// ------------------------------------------------------------------
+		// COMENTADO: reconexão manual disparada a cada Disconnected.
+		//
+		// Código original:
+		//
+		//     // Trigger instance restart via websocket-capable service (non-blocking)
+		//     go func(instanceID string) {
+		//         mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Disconnected detected, restarting instance", instanceID)
+		//         if err := mycli.service.ReconnectClient(instanceID); err != nil {
+		//             mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to restart instance: %v", instanceID, err)
+		//         }
+		//     }(mycli.userID)
+		//
+		// QUAL ERA O PROBLEMA — três defeitos somados neste caminho:
+		//
+		// 1. DOIS CLIENTES POR EVENTO. ReconnectClient envia o sinal de kill,
+		//    e o loop do StartClient responde chamando w.StartClient(cd) no
+		//    ramo de restart. Logo depois, o próprio ReconnectClient chama
+		//    StartInstance, que faz outro `go w.StartClient(...)`. Um único
+		//    Disconnected produzia dois sockets para o mesmo device.
+		//
+		// 2. GOROUTINE VAZADA. O kill é enviado de forma não-bloqueante
+		//    (select com default) e o canal é apagado do mapa na sequência.
+		//    Quando o envio não é entregue — o que acontece se o loop antigo
+		//    estiver no sleep de 1s — o select do StartClient passa a ler de
+		//    um canal nil, que bloqueia para sempre. Ele cai eternamente no
+		//    default e dorme 1s em loop: a goroutine antiga nunca termina e
+		//    segue segurando o client velho.
+		//
+		// 3. ESCRITA CONCORRENTE EM MAPA. Rodando na goroutine do event
+		//    handler, ReconnectClient faz delete() em clientPointer,
+		//    myClientPointer e killChannel — mapas de serviço sem mutex. É
+		//    exatamente o que o comentário do teardownQR proíbe nesta mesma
+		//    file: causa `fatal error: concurrent map writes`, que não é panic
+		//    recuperável — mata o processo e derruba TODAS as instâncias
+		//    juntas.
+		//
+		// Com EnableAutoReconnect = true (ver StartClient), a reconexão volta
+		// a ser do whatsmeow: um único client, com backoff exponencial. O
+		// status no banco continua correto porque `case *events.Connected`
+		// chama UpdateConnected a cada conexão bem-sucedida, incluindo as
+		// reconexões automáticas.
+		//
+		// ATENÇÃO: ReconnectClient continua alcançável pelo endpoint da API
+		// (instance_service.go) e pelo retry de envio (send_service.go), e
+		// esses dois caminhos ainda executam os delete() sem mutex. A proteção
+		// dos mapas compartilhados segue pendente.
+		// ------------------------------------------------------------------
 	case *events.LabelEdit:
 		doWebhook = true
 		postMap["event"] = "LabelEdit"
