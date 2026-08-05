@@ -1,18 +1,23 @@
 name: Build and Publish Docker Image
 
+# A imagem é publicada a partir de uma TAG, não de push na main.
+#
+# Antes o gatilho era "push na main", o que misturava duas decisões distintas:
+# integrar código e publicar uma release. Como o Dockerfile faz COPY . ., até um
+# commit de documentação republicava a mesma versão com um digest diferente,
+# invalidando silenciosamente qualquer deploy que fixasse o digest — foi o que
+# aconteceu com a 0.7.3, publicada duas vezes.
+#
+# Agora integrar na main é livre, e a imagem só nasce quando você corta a tag.
+# Tag git, release e digest passam a nascer juntos por construção.
+#
+#   git tag -a 0.7.4 -m "..." && git push origin 0.7.4
 on:
   push:
-    branches:
-      - main
-    # Um commit só de documentação não muda o binário, mas muda o contexto de
-    # build (o Dockerfile faz COPY . .), então republicaria a mesma versão com
-    # um digest diferente — quebrando qualquer deploy que fixe o digest.
-    # docs/docs.go NÃO entra aqui: é Go gerado pelo swag e vai para o binário.
-    paths-ignore:
-      - '**.md'
-      - 'n8n/**'
-      - 'n8n-flows-corrigidos/**'
-      - 'patches/**'
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
 
 jobs:
   build_deploy:
@@ -27,9 +32,24 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Read version
+      # A versão vem da tag, e o arquivo VERSION precisa concordar com ela.
+      # Sem essa checagem dá para publicar uma imagem :0.7.4 cujo binário reporta
+      # 0.7.3 — divergência que só aparece depois, em produção, quando alguém
+      # tenta descobrir o que está rodando.
+      - name: Resolve version
         id: version
-        run: echo "version=$(cat VERSION 2>/dev/null || echo '0.0.0')" >> $GITHUB_OUTPUT
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Esta workflow publica a partir de tags. Rode-a selecionando uma tag, ou empurre uma: git tag -a 0.7.4 -m '...' && git push origin 0.7.4"
+            exit 1
+          fi
+          tag="$GITHUB_REF_NAME"
+          file="$(tr -d '[:space:]' < VERSION)"
+          if [ "$tag" != "$file" ]; then
+            echo "::error::A tag '$tag' não bate com o arquivo VERSION ('$file'). Ajuste o VERSION, faça o commit e recrie a tag."
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Docker meta
         id: meta
