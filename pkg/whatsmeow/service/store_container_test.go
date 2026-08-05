@@ -18,10 +18,15 @@ import (
 // max_connections: StartClient built a new sqlstore.Container — and therefore a
 // whole new *sql.DB pool — on every (re)connect, and nothing ever closed them.
 //
+// They exercise getAuthContainer, which memoises a single container in the
+// package-level sharedAuthContainer. auth_container_retry_test.go covers the
+// retry-after-failure behaviour; these tests add the part it does not measure:
+// what the server actually sees in pg_stat_activity.
+//
 // They need a live PostgreSQL and are skipped unless POSTGRES_TEST_DSN is set,
 // so ordinary `go test ./...` runs are unaffected:
 //
-//	POSTGRES_TEST_DSN='postgresql://postgres:root@localhost:5432/evogo_auth?sslmode=disable' go test ./pkg/whatsmeow/service/ -run StoreContainer -v
+//	POSTGRES_TEST_DSN='postgresql://postgres:root@localhost:5432/evogo_auth?sslmode=disable' go test ./pkg/whatsmeow/service/ -run AuthContainer -v
 
 func testDSN(t *testing.T) string {
 	t.Helper()
@@ -30,6 +35,32 @@ func testDSN(t *testing.T) string {
 		t.Skip("POSTGRES_TEST_DSN not set; skipping PostgreSQL integration test")
 	}
 	return dsn
+}
+
+// resetSharedAuthContainer gives a test a clean container and restores the
+// previous one afterwards. sharedAuthContainer is process-wide, so without this
+// the first test's container would carry into the others and the connection
+// counts below would not measure what they claim to.
+func resetSharedAuthContainer(t *testing.T) {
+	t.Helper()
+
+	sharedAuthContainerMu.Lock()
+	previous := sharedAuthContainer
+	sharedAuthContainer = nil
+	sharedAuthContainerMu.Unlock()
+
+	t.Cleanup(func() {
+		sharedAuthContainerMu.Lock()
+		defer sharedAuthContainerMu.Unlock()
+		if sharedAuthContainer != nil && sharedAuthContainer != previous {
+			_ = sharedAuthContainer.Close()
+		}
+		sharedAuthContainer = previous
+	})
+}
+
+func newTestService(dsn string) *whatsmeowService {
+	return &whatsmeowService{config: &config.Config{PostgresAuthDB: dsn}}
 }
 
 // openProbe returns a single-connection pool used only to observe the server's
@@ -62,31 +93,31 @@ func countBackends(t *testing.T, probe *sql.DB) int {
 	return n
 }
 
-// TestStoreContainerReusesSinglePool is the regression test for the fix: many
+// maxAuthOpenConns mirrors the Postgres cap set in getAuthContainer.
+const maxAuthOpenConns = 20
+
+// TestAuthContainerReusesSinglePool is the regression test for the fix: many
 // StartClient-equivalent calls must share one container, and therefore one
 // bounded pool.
-func TestStoreContainerReusesSinglePool(t *testing.T) {
+func TestAuthContainerReusesSinglePool(t *testing.T) {
 	dsn := testDSN(t)
+	resetSharedAuthContainer(t)
 	probe := openProbe(t, dsn)
 	defer probe.Close()
 
 	before := countBackends(t, probe)
+	w := newTestService(dsn)
 
-	w := whatsmeowService{
-		config:      &config.Config{PostgresAuthDB: dsn},
-		storeHolder: &storeContainerHolder{},
-	}
-
-	first, err := w.storeContainer()
+	first, err := w.getAuthContainer()
 	if err != nil {
-		t.Fatalf("storeContainer: %v", err)
+		t.Fatalf("getAuthContainer: %v", err)
 	}
 
 	const iterations = 60
 	for i := 0; i < iterations; i++ {
-		got, err := w.storeContainer()
+		got, err := w.getAuthContainer()
 		if err != nil {
-			t.Fatalf("storeContainer #%d: %v", i, err)
+			t.Fatalf("getAuthContainer #%d: %v", i, err)
 		}
 		if got != first {
 			t.Fatalf("call #%d returned a different container: the pool is not being shared", i)
@@ -94,27 +125,22 @@ func TestStoreContainerReusesSinglePool(t *testing.T) {
 	}
 
 	after := countBackends(t, probe)
-	t.Logf("FIXED: backends before=%d after=%d delta=%d over %d storeContainer() calls",
+	t.Logf("FIXED: backends before=%d after=%d delta=%d over %d getAuthContainer() calls",
 		before, after, after-before, iterations)
 
-	// MaxOpenConns is 25; a shared container cannot exceed it no matter how many
-	// times StartClient runs.
-	if delta := after - before; delta > 25 {
-		t.Fatalf("backend count grew by %d, above the configured MaxOpenConns of 25", delta)
+	if delta := after - before; delta > maxAuthOpenConns {
+		t.Fatalf("backend count grew by %d, above the configured MaxOpenConns of %d", delta, maxAuthOpenConns)
 	}
 }
 
-// TestStoreContainerConcurrentCallersShareOnePool guards the holder itself:
-// whatsmeowService methods use value receivers, so synchronisation state stored
-// inline would be copied per call and would silently stop deduplicating. Run
-// with -race.
-func TestStoreContainerConcurrentCallersShareOnePool(t *testing.T) {
+// TestAuthContainerConcurrentCallersShareOnePool guards the memoisation itself:
+// every concurrent caller must observe the same container, so a burst of
+// simultaneous (re)connects cannot open a second pool. Run with -race.
+func TestAuthContainerConcurrentCallersShareOnePool(t *testing.T) {
 	dsn := testDSN(t)
+	resetSharedAuthContainer(t)
 
-	w := whatsmeowService{
-		config:      &config.Config{PostgresAuthDB: dsn},
-		storeHolder: &storeContainerHolder{},
-	}
+	w := newTestService(dsn)
 
 	const goroutines = 32
 	var wg sync.WaitGroup
@@ -125,7 +151,7 @@ func TestStoreContainerConcurrentCallersShareOnePool(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
-			results[i], errs[i] = w.storeContainer()
+			results[i], errs[i] = w.getAuthContainer()
 		}(i)
 	}
 	wg.Wait()
@@ -135,25 +161,22 @@ func TestStoreContainerConcurrentCallersShareOnePool(t *testing.T) {
 			t.Fatalf("goroutine %d: %v", i, errs[i])
 		}
 		if results[i] != results[0] {
-			t.Fatalf("goroutine %d got a different container: holder is not shared", i)
+			t.Fatalf("goroutine %d got a different container: the container is not shared", i)
 		}
 	}
 	t.Logf("CONCURRENCY: all %d concurrent callers received the same container", goroutines)
 }
 
-// TestStoreContainerUnderLoadStaysBounded drives real query traffic through the
+// TestAuthContainerUnderLoadStaysBounded drives real query traffic through the
 // shared container from many concurrent callers and samples the server-side
 // backend count, showing connections are reused rather than accumulated.
-func TestStoreContainerUnderLoadStaysBounded(t *testing.T) {
+func TestAuthContainerUnderLoadStaysBounded(t *testing.T) {
 	dsn := testDSN(t)
+	resetSharedAuthContainer(t)
 	probe := openProbe(t, dsn)
 	defer probe.Close()
 
-	w := whatsmeowService{
-		config:      &config.Config{PostgresAuthDB: dsn},
-		storeHolder: &storeContainerHolder{},
-	}
-
+	w := newTestService(dsn)
 	before := countBackends(t, probe)
 
 	const (
@@ -166,7 +189,7 @@ func TestStoreContainerUnderLoadStaysBounded(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			c, err := w.storeContainer()
+			c, err := w.getAuthContainer()
 			if err != nil {
 				return
 			}
@@ -201,8 +224,8 @@ sampling:
 	t.Logf("LOAD: %d concurrent workers x %d queries — backends before=%d peak=%d after=%d",
 		workers, queriesPerWorker, before, peak, after)
 
-	if peak-before > 25 {
-		t.Fatalf("peak backend count grew by %d, above the configured MaxOpenConns of 25", peak-before)
+	if peak-before > maxAuthOpenConns {
+		t.Fatalf("peak backend count grew by %d, above the configured MaxOpenConns of %d", peak-before, maxAuthOpenConns)
 	}
 }
 

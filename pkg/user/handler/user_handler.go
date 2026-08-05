@@ -1,18 +1,41 @@
 package user_handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 	user_service "github.com/evolution-foundation/evolution-go/pkg/user/service"
 	"github.com/gin-gonic/gin"
+	"go.mau.fi/whatsmeow"
 )
+
+// writeUserWAError maps WhatsApp IQ / context errors to honest HTTP statuses.
+// rate-overlimit → 429; IQ/context timeout or cancel → 504; everything else → 500.
+func writeUserWAError(ctx *gin.Context, err error) {
+	switch {
+	case errors.Is(err, whatsmeow.ErrIQRateOverLimit):
+		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error()})
+	case errors.Is(err, whatsmeow.ErrIQTimedOut),
+		errors.Is(err, context.DeadlineExceeded),
+		errors.Is(err, context.Canceled):
+		ctx.JSON(http.StatusGatewayTimeout, gin.H{"error": err.Error()})
+	default:
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
+}
 
 type UserHandler interface {
 	GetUser(ctx *gin.Context)
 	CheckUser(ctx *gin.Context)
 	GetAvatar(ctx *gin.Context)
 	GetContacts(ctx *gin.Context)
+	SaveContact(ctx *gin.Context)
+	CreateProduct(ctx *gin.Context)
+	UpdateProduct(ctx *gin.Context)
+	GetCatalog(ctx *gin.Context)
+	DeleteProducts(ctx *gin.Context)
 	GetPrivacy(ctx *gin.Context)
 	SetPrivacy(ctx *gin.Context)
 	BlockContact(ctx *gin.Context)
@@ -118,7 +141,9 @@ func (u *userHandler) CheckUser(ctx *gin.Context) {
 // @Param message body user_service.GetAvatarStruct true "Avatar data"
 // @Success 200 {object} gin.H "success"
 // @Failure 400 {object} gin.H "Error on validation"
+// @Failure 429 {object} gin.H "WhatsApp rate limit"
 // @Failure 500 {object} gin.H "Internal server error"
+// @Failure 504 {object} gin.H "WhatsApp query timeout"
 // @Router /user/avatar [post]
 func (u *userHandler) GetAvatar(ctx *gin.Context) {
 	getInstance := ctx.MustGet("instance")
@@ -146,9 +171,9 @@ func (u *userHandler) GetAvatar(ctx *gin.Context) {
 		return
 	}
 
-	pic, err := u.userService.GetAvatar(data, instance)
+	pic, err := u.userService.GetAvatar(ctx.Request.Context(), data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeUserWAError(ctx, err)
 		return
 	}
 
@@ -180,6 +205,53 @@ func (u *userHandler) GetContacts(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "success", "data": contacts})
+}
+
+// Save a contact
+// @Summary Save a contact
+// @Description Adiciona/atualiza um contato na lista de contatos do WhatsApp da instância
+// @Description (mesmo mecanismo da tela "Novo contato" do WhatsApp Web). Com `saveOnPhone: true`
+// @Description (padrão), sincroniza também com a agenda do celular primário.
+// @Tags User
+// @Accept json
+// @Produce json
+// @Param message body user_service.SaveContactStruct true "Contact data"
+// @Success 200 {object} gin.H "success"
+// @Failure 400 {object} gin.H "Error on validation"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /user/savecontact [post]
+func (u *userHandler) SaveContact(ctx *gin.Context) {
+	getInstance := ctx.MustGet("instance")
+
+	instance, ok := getInstance.(*instance_model.Instance)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "instance not found"})
+		return
+	}
+
+	var data *user_service.SaveContactStruct
+	err := ctx.ShouldBindBodyWithJSON(&data)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if data.Number == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "phone number is required"})
+		return
+	}
+
+	if data.FullName == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "fullName is required"})
+		return
+	}
+
+	if err := u.userService.SaveContact(data, instance); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
 // Get a user's privacy settings

@@ -1,0 +1,766 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "worker-fila-go",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        31840,
+        10464
+      ],
+      "id": "2d12e47a-d56b-4f3d-947d-4d70bda7c253",
+      "name": "Webhook1",
+      "webhookId": "f67833dd-b487-409a-a7bf-cde3e8c97334"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox\nSET \n  status = 'SENDING',\n  last_attempt_at = NOW(),\n  attempt_count = attempt_count + 1\nWHERE id IN (\n  SELECT id\n  FROM whatsapp_outbox\n  WHERE instance = $1\n    AND (\n      (status IN ('QUEUED', 'RETRY') AND (next_attempt_at IS NULL OR next_attempt_at <= NOW()))\n      OR \n      (status = 'SENDING' AND last_attempt_at < NOW() - INTERVAL '10 minutes')\n    )\n  AND api_version = 'go'\n  ORDER BY created_at ASC\n  LIMIT 50\n  FOR UPDATE SKIP LOCKED\n)\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ $('Webhook1').item.json.body.instance }}"
+        }
+      },
+      "id": "73dc9b52-8642-4dbb-97fc-363fecd67cfb",
+      "name": "Reserve & Fetch1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        32064,
+        10464
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let items = $input.all();\n\n// Se houver mais de 5 mensagens reservadas no lote atual, embaralha a ordem de envio\nif (items.length > 5) {\n    // Algoritmo de Fisher-Yates para garantir um embaralhamento perfeito e aleatório\n    for (let i = items.length - 1; i > 0; i--) {\n        const j = Math.floor(Math.random() * (i + 1));\n        // Troca os itens de lugar\n        [items[i], items[j]] = [items[j], items[i]];\n    }\n}\n\nreturn items;"
+      },
+      "id": "2cabb591-3fa5-4f4f-9240-e39b16ab3bf8",
+      "name": "Embaralhar Lote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32288,
+        10464
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        32512,
+        10464
+      ],
+      "id": "b85c249a-19d8-42ca-ace5-438033e286c0",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "amount": "={{\n  (function() {\n    const webhookData = $items(\"Webhook1\")[0].json.body;\n    const size = webhookData.fila_tamanho || 0;\n    if (size >= 50) return Math.floor(Math.random() * 11) + 15;\n    else if (size >= 35) return Math.floor(Math.random() * 6) + 10;\n    else if (size >= 20) return Math.floor(Math.random() * 5) + 5;\n    else return Math.floor(Math.random() * 3) + 2;\n  })()\n}}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        32736,
+        10464
+      ],
+      "id": "27a897bd-275c-4b64-91fb-f709fd758c77",
+      "name": "Wait (Anti-bot)1",
+      "webhookId": "d9c6131e-30e0-4046-a489-dab76f3ddaeb"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json[\"id\"]}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "d0af56e0-8ae5-4428-bc34-c9704d155947",
+      "name": "Has Item?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        32960,
+        10464
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "baseUrl",
+              "value": "https://evogo.athenesistemas.com.br"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $json.instance }}"
+            },
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "29354cb8-a893-44aa-b5d5-c624d83f7242",
+      "name": "Set BaseURL1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        33184,
+        10464
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.baseUrl }}/instance/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        33408,
+        10464
+      ],
+      "id": "9aa8e400-1c62-40a0-ae20-8cdd3097fcbf",
+      "name": "Get Instances"
+    },
+    {
+      "parameters": {
+        "jsCode": "const targetName = $('Set BaseURL1').item.json.instance;\nconst response = $json;\n\n// A API pode devolver array direto ou dentro de uma chave (instances/data/result)\nlet list = response;\nif (!Array.isArray(list)) {\n  list = response.instances || response.data || response.result || Object.values(response)[0];\n}\nif (!Array.isArray(list)) {\n  throw new Error('Não achei a lista de instâncias no retorno de /instance/all: ' + JSON.stringify(response).slice(0, 500));\n}\n\nconst found = list.find(inst => {\n  const name = inst.name || inst.instanceName || inst.instance || inst.Instance || inst.nome;\n  return name === targetName;\n});\n\nif (!found) {\n  throw new Error(`Instância \"${targetName}\" não encontrada em /instance/all`);\n}\n\nconst instanceId = found.id || found.instanceId || found.Id || found.ID || found.uuid;\n\nif (!instanceId) {\n  throw new Error('Instância achada mas nenhum campo de ID reconhecido: ' + JSON.stringify(found));\n}\n\nreturn {\n  json: {\n    ...$('Set BaseURL1').item.json,\n    instanceId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        33632,
+        10464
+      ],
+      "id": "1acb8396-36c3-46d8-9164-b31b67a46ddc",
+      "name": "Resolver Instance ID"
+    },
+    {
+      "parameters": {
+        "jsCode": "// [Athene] Monta o payload para o SUBFLUXO reutilizável de proxy\n// (proxy-setter-v2-e-go), variante Evo Go. Substitui toda a antiga cadeia\n// inline de 4 tentativas (Hub/Ping/Salva-Vidas/Set Proxy/Morto).\nconst r = $('Resolver Instance ID').item.json;\nreturn { json: {\n  instance: r.instance,\n  instance_id: r.instanceId,\n  apikey: r.apikey || 'porv@2024Pc2Info',\n  evo_tipo: 'go',\n  evo_base_url: r.baseUrl || 'https://evogo.athenesistemas.com.br',\n  limite_envios: 50\n} };"
+      },
+      "name": "Preparar Proxy (Go)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        33856,
+        10464
+      ],
+      "id": "aa000001-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_COM_ID_DO_SUBFLUXO",
+          "mode": "list",
+          "cachedResultName": "proxy-setter-v2-e-go"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Aplicar Proxy (Sub)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        34080,
+        10464
+      ],
+      "id": "aa000002-0000-4000-8000-000000000002",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "aa000003-0000-4000-8000-000000000003",
+              "leftValue": "={{ $json.success === true }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Proxy OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        34304,
+        10464
+      ],
+      "id": "aa000004-0000-4000-8000-000000000004"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.athenesistemas.com.br/webhook/send-message-go",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Set BaseURL1').item.json.apikey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Loop Over Items1').item.json.remote_jid }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $('Loop Over Items1').item.json.message_text }}"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $('Set BaseURL1').item.json.instance }}"
+            },
+            {
+              "name": "message_type",
+              "value": "={{ $('Loop Over Items1').item.json.message_type || 'text'}}"
+            },
+            {
+              "name": "file_url",
+              "value": "={{ $('Loop Over Items1').item.json.file_url || ''}}"
+            },
+            {
+              "name": "file_b64",
+              "value": "={{ $('Loop Over Items1').item.json.file_b64 || ''}}"
+            },
+            {
+              "name": "file_name",
+              "value": "={{ $('Loop Over Items1').item.json.file_name || ''}}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $('Loop Over Items1').item.json.mime_type || ''}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Loop Over Items1').item.json.caption || ''}}"
+            },
+            {
+              "name": "interactiveButtons",
+              "value": "={{ JSON.stringify($('Loop Over Items1').item.json.interactive_buttons || null) }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "f6c9a225-a7d2-43b0-88f4-f463de3ce01a",
+      "name": "Redigir/Enviar1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        34528,
+        10336
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox \nSET status = 'RETRY', \n    next_attempt_at = NOW() + INTERVAL '10 minutes', \n    last_error = $2\nWHERE id = $1::uuid;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "=={{ $('Loop Over Items1').item.json.id }}\n{{ $('Aplicar Proxy (Sub)').item.json.erro_formatado || ('[' + ($('Aplicar Proxy (Sub)').item?.json?.empresa_id || 'Desconhecida') + ' - ' + ($('Aplicar Proxy (Sub)').item?.json?.maquina_nome || 'Desconhecida') + '] ' + ($('Aplicar Proxy (Sub)').item?.json?.motivo_falha || 'Nenhum proxy disponível/válido - envio BLOQUEADO por segurança')) }}"
+        }
+      },
+      "name": "Espera Inteligente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        34528,
+        10688
+      ],
+      "id": "31a508bb-28a6-419f-b8f4-ddf6c2e45bd6",
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ Number( $json.statusCode ?? $json.response?.statusCode ?? $json.status ?? $json.response?.status ?? $json.error?.status ?? $json.error?.statusCode ?? $json.error?.response?.status ?? 500 ) }}",
+              "operation": "largerEqual",
+              "value2": 400
+            }
+          ]
+        }
+      },
+      "name": "IF Falhou?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        34752,
+        10336
+      ],
+      "id": "28511195-43a4-4d5d-b0bf-80ac238906ab"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE public.whatsapp_outbox o\nSET\n  status         = 'SENT',\n  sent_at        = COALESCE(o.sent_at, NOW()),\n  last_error     = NULL,\n  provider_msg_id = CASE\n    WHEN o.provider_msg_id IS NOT NULL THEN o.provider_msg_id\n    WHEN EXISTS (\n      SELECT 1 FROM public.whatsapp_outbox x\n      WHERE x.provider_msg_id = $2 AND x.id <> $1::uuid\n    ) THEN o.provider_msg_id\n    ELSE $2\n  END\nWHERE o.id = $1::uuid\n  AND o.status IN ('SENDING','RETRY','QUEUED')\nRETURNING o.id, o.provider_msg_id;",
+        "options": {
+          "queryReplacement": "={{ $('Loop Over Items1').item.json.id }}\n{{ $json.body?.key?.id ?? $json.body?.data?.key?.id ?? $json.key?.id ?? null }}"
+        }
+      },
+      "name": "Outbox UPDATE (SENT)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        34976,
+        10208
+      ],
+      "id": "2d352919-d2df-462d-8f30-c68a1660034d",
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE whatsapp_outbox\nSET\n  status = CASE\n             WHEN attempt_count + 1 >= 5 OR $2 = ANY(ARRAY[401,403,404]) THEN 'FAILED'\n             ELSE 'RETRY'\n           END,\n  -- ADICIONAMOS O TEMPO DE ESPERA AQUI NAS FALHAS COMUNS:\n  next_attempt_at = CASE \n                      WHEN attempt_count + 1 < 5 AND NOT ($2 = ANY(ARRAY[401,403,404])) THEN NOW() + INTERVAL '5 minutes'\n                      ELSE NULL\n                    END,\n  last_error      = LEFT($3::text, 300),\n  last_attempt_at = NOW(),\n  attempt_count   = attempt_count + 1\nWHERE id = $1::uuid\n  AND status IN ('SENDING','RETRY')\nRETURNING id;",
+        "options": {
+          "queryReplacement": "=={{ $('Loop Over Items1').item.json.id }}\n{{ Number( $json.statusCode ?? $json.response?.statusCode ?? $json.status ?? $json.response?.status ?? $json.error?.status ?? $json.error?.statusCode ?? $json.error?.response?.status ?? 500 ) }}\n{{ '[' + ($('Aplicar Proxy (Sub)').item?.json?.empresa_id || 'Desconhecida') + ' - ' + ($('Aplicar Proxy (Sub)').item?.json?.maquina_nome || 'Desconhecida') + '] ' + JSON.stringify($json.error ?? $json) }}"
+        }
+      },
+      "name": "Outbox UPDATE (RETRY/FAILED)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        34976,
+        10496
+      ],
+      "id": "94f18c56-c925-42a2-8760-9e275302932b",
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Incrementa o contador de envios da porta usada (proxy-increment).\n// A porta agora vem do subfluxo de proxy (Aplicar Proxy (Sub) -> porta).\nconst SECRET_KEY = $env.ATHENE_SECRET_KEY;\nif (!SECRET_KEY) throw new Error('ATHENE_SECRET_KEY nao definida nas variaveis de ambiente do n8n.');\nconst port = Number($('Aplicar Proxy (Sub)').item.json.porta || 0);\nconst timestamp = Date.now().toString();\nconst dataObj = { porta: port, instance: $('Set BaseURL1').item.json.instance };\nconst dataStr = JSON.stringify(dataObj);\nconst crypto = require('crypto');\nconst signature = crypto.createHmac('sha256', SECRET_KEY).update(timestamp + dataStr).digest('hex');\n\nreturn { json: { req_body: { data: dataStr, timestamp: parseInt(timestamp), signature } } };"
+      },
+      "name": "HMAC Incremento1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        35200,
+        10208
+      ],
+      "id": "4a03af2b-3e72-4197-bab3-25f6ea79899d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api_athene_hub:3000/api/proxy-increment",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.req_body }}",
+        "options": {}
+      },
+      "name": "Avisar Hub (+1)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        35424,
+        10208
+      ],
+      "id": "1668e541-b5f0-49bd-b700-3f1911097bde",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ Number( $('Redigir/Enviar1').item.json.statusCode ?? $('Redigir/Enviar1').item.json.response?.statusCode ?? $('Redigir/Enviar1').item.json.status ?? $('Redigir/Enviar1').item.json.response?.status ?? $('Redigir/Enviar1').item.json.error?.status ?? $('Redigir/Enviar1').item.json.error?.statusCode ?? $('Redigir/Enviar1').item.json.error?.response?.status ?? 500 ) }}",
+              "value2": "404"
+            }
+          ]
+        }
+      },
+      "name": "É Número Inexistente?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        35200,
+        10496
+      ],
+      "id": "cc8408ff-6f43-4afa-9477-153263cada7a"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO whatsapp_blacklist (instance, remote_jid, notes)\nVALUES ($1, $2, 'Bloqueio Automático: Número não existe no WhatsApp (Erro 404)')\nON CONFLICT (instance, remote_jid) DO NOTHING;",
+        "options": {
+          "queryReplacement": "={{ $('Loop Over Items1').item.json.instance }}\n{{ $('Loop Over Items1').item.json.remote_jid }}"
+        }
+      },
+      "name": "Execute a SQL query (numero Inexistente)1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        35424,
+        10592
+      ],
+      "id": "57ca2a86-d56d-4fc0-9785-c20c0df7e966",
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Reserve & Fetch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reserve & Fetch1": {
+      "main": [
+        [
+          {
+            "node": "Embaralhar Lote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embaralhar Lote": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait (Anti-bot)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (Anti-bot)1": {
+      "main": [
+        [
+          {
+            "node": "Has Item?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Item?1": {
+      "main": [
+        [
+          {
+            "node": "Set BaseURL1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set BaseURL1": {
+      "main": [
+        [
+          {
+            "node": "Get Instances",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instances": {
+      "main": [
+        [
+          {
+            "node": "Resolver Instance ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Instance ID": {
+      "main": [
+        [
+          {
+            "node": "Preparar Proxy (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Proxy (Go)": {
+      "main": [
+        [
+          {
+            "node": "Aplicar Proxy (Sub)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar Proxy (Sub)": {
+      "main": [
+        [
+          {
+            "node": "Proxy OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Proxy OK?": {
+      "main": [
+        [
+          {
+            "node": "Redigir/Enviar1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redigir/Enviar1": {
+      "main": [
+        [
+          {
+            "node": "IF Falhou?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Falhou?1": {
+      "main": [
+        [
+          {
+            "node": "Outbox UPDATE (RETRY/FAILED)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Outbox UPDATE (SENT)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox UPDATE (SENT)1": {
+      "main": [
+        [
+          {
+            "node": "HMAC Incremento1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HMAC Incremento1": {
+      "main": [
+        [
+          {
+            "node": "Avisar Hub (+1)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avisar Hub (+1)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Outbox UPDATE (RETRY/FAILED)1": {
+      "main": [
+        [
+          {
+            "node": "É Número Inexistente?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Número Inexistente?1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query (numero Inexistente)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query (numero Inexistente)1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Espera Inteligente": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Webhook1": [
+      {
+        "headers": {
+          "connection": "close",
+          "host": "n8n.athenesistemas.com.br",
+          "x-forwarded-scheme": "https",
+          "x-forwarded-proto": "https",
+          "x-forwarded-for": "172.18.0.1",
+          "x-real-ip": "172.18.0.1",
+          "content-length": "38",
+          "accept": "application/json,text/html,application/xhtml+xml,application/xml,text/*;q=0.9, image/*;q=0.8, */*;q=0.7",
+          "content-type": "application/json",
+          "user-agent": "axios/1.12.0",
+          "accept-encoding": "gzip, compress, deflate, br"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+          "instance": "Athene",
+          "fila_tamanho": 2
+        },
+        "webhookUrl": "https://n8n.athenesistemas.com.br/webhook/worker-fila-go",
+        "executionMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  }
+}

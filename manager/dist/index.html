@@ -10,5 +10,399 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- [Athene] Injeta o dashboard customizado dentro da aba Dashboard do manager,
+         substituindo o placeholder "Dashboard content will be implemented here...".
+         Como so temos o build do front, fazemos via DOM (sem tocar no JS minificado). -->
+    <script>
+      (function () {
+        var PHRASE = "Dashboard content will be implemented here";
+        function findPlaceholder() {
+          var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+          var n;
+          while ((n = w.nextNode())) {
+            if (n.nodeValue && n.nodeValue.indexOf(PHRASE) > -1) return n.parentElement;
+          }
+          return null;
+        }
+        // Ajusta a altura do iframe ao conteudo (same-origin), evitando scroll
+        // interno e espaco vazio acima/abaixo.
+        function sizeFrame(frame) {
+          try {
+            var h = frame.contentWindow.document.documentElement.scrollHeight;
+            if (h && Math.abs((parseInt(frame.style.height, 10) || 0) - h) > 4) {
+              frame.style.height = h + "px";
+            }
+          } catch (e) {}
+        }
+        // Acha o H1 "Dashboard" (o titulo da pagina; o item do menu lateral e SPAN).
+        function findTitle() {
+          var hs = document.querySelectorAll("h1");
+          for (var i = 0; i < hs.length; i++) {
+            if (hs[i].textContent.trim() === "Dashboard") return hs[i];
+          }
+          return null;
+        }
+        function inject() {
+          var title = findTitle();
+          if (!title) return; // nao esta na aba Dashboard
+          var container = title.parentElement; // DIV.p-6, dentro do MAIN rolavel
+          if (!container) return;
+          var frame = document.getElementById("egogo-dash-frame");
+          if (frame && frame.isConnected) {
+            if (frame.parentElement === container) { sizeFrame(frame); return; }
+            frame.remove(); // estava no lugar errado (ex.: solto no body) -> reinjeta
+          }
+          var ph = findPlaceholder();
+          if (ph) ph.remove();
+          frame = document.createElement("iframe");
+          frame.id = "egogo-dash-frame";
+          frame.src = "/dashboard?embed=1";
+          frame.setAttribute("scrolling", "no");
+          frame.style.cssText =
+            "width:100%;height:640px;border:0;border-radius:12px;display:block;overflow:hidden;margin-top:8px";
+          frame.addEventListener("load", function () { sizeFrame(frame); });
+          container.appendChild(frame); // logo abaixo do titulo, no lugar certo
+        }
+        var obs = new MutationObserver(inject);
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        document.addEventListener("DOMContentLoaded", inject);
+        setInterval(inject, 800); // fallback p/ navegacao client-side do SPA
+      })();
+    </script>
+    <!-- [Athene] Seção "Salvar contato" (/user/savecontact) dentro do modal
+         "Testar mensagens". A apikey da instância é obtida AUTOMATICAMENTE:
+         interceptamos o fetch do manager pra capturar o token de cada instância
+         (campo `token` do /instance/all) e o header apikey das chamadas /send|/user.
+         Sem campo manual — o token certo é escolhido pelo nome da instância no modal. -->
+    <script>
+      (function () {
+        // 1) Patch do fetch pra capturar tokens de instância automaticamente.
+        if (!window.__atheneFetchPatched) {
+          window.__atheneFetchPatched = true;
+          window.__atheneTokens = {};
+          var origFetch = window.fetch;
+          window.fetch = function (input, init) {
+            var url = typeof input === "string" ? input : (input && input.url) || "";
+            try {
+              if (/\/(send|user)\//.test(url)) {
+                var h = init && init.headers;
+                var k = h && (h.get ? h.get("apikey") : h.apikey || h.apiKey);
+                if (k) window.__atheneLastKey = k;
+              }
+            } catch (e) {}
+            var p = origFetch.apply(this, arguments);
+            if (url.indexOf("/instance/all") > -1) {
+              p.then(function (res) {
+                try {
+                  res.clone().json().then(function (j) {
+                    var list = (j && j.data) || (Array.isArray(j) ? j : []);
+                    list.forEach(function (it) {
+                      if (it && it.name && it.token) window.__atheneTokens[it.name] = it.token;
+                    });
+                  }).catch(function () {});
+                } catch (e) {}
+              });
+            }
+            return p;
+          };
+        }
+
+        var INPUT_CLS =
+          "w-full rounded-md border border-input bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+        function findModalHeader() {
+          var h2s = document.querySelectorAll("h2");
+          for (var i = 0; i < h2s.length; i++) {
+            if (h2s[i].textContent.indexOf("Testar mensagens") > -1) return h2s[i];
+          }
+          return null;
+        }
+        function instanceTokenFor(name) {
+          return (name && window.__atheneTokens[name]) || window.__atheneLastKey || "";
+        }
+        function injectSaveContact() {
+          var header = findModalHeader();
+          if (!header) return; // modal fechado
+          var modal =
+            (header.closest && header.closest(".max-w-2xl")) ||
+            header.parentElement.parentElement;
+          if (!modal || modal.querySelector("#athene-sc-block")) return;
+          var instName = header.textContent.replace(/^[\s\S]*Testar mensagens\s*-\s*/, "").trim();
+
+          // localiza o rodape (botao "Enviar teste") pra inserir logo acima
+          var footer = null;
+          var btns = modal.querySelectorAll("button");
+          for (var j = 0; j < btns.length; j++) {
+            if (btns[j].textContent.indexOf("Enviar teste") > -1) {
+              footer = btns[j].parentElement;
+              break;
+            }
+          }
+
+          var block = document.createElement("div");
+          block.id = "athene-sc-block";
+          block.style.cssText =
+            "border-top:1px solid var(--border,#333);margin-top:14px;padding-top:12px";
+          block.innerHTML =
+            '<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Salvar contato (/user/savecontact)</p>' +
+            '<p class="mb-2 text-xs text-muted-foreground">Usa o <b>número de destino</b> acima como contato a salvar. O token da instância é detectado automaticamente.</p>' +
+            '<input id="ath-sc-name" placeholder="Nome do contato (fullName)" class="' + INPUT_CLS + '" style="margin-bottom:8px" type="text" />' +
+            '<label class="flex items-center gap-2 text-sm text-foreground" style="margin-bottom:10px"><input id="ath-sc-phone" type="checkbox" checked /> Salvar também na agenda do celular</label>' +
+            '<button id="ath-sc-btn" type="button" class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Salvar contato</button>' +
+            '<div id="ath-sc-result" class="text-xs" style="margin-top:8px;min-height:16px;word-break:break-word"></div>';
+
+          if (footer) footer.parentElement.insertBefore(block, footer);
+          else modal.appendChild(block);
+
+          block.querySelector("#ath-sc-btn").onclick = function () {
+            var numEl = document.getElementById("test-number");
+            var num = (numEl ? numEl.value : "").replace(/\D/g, "");
+            var name = block.querySelector("#ath-sc-name").value.trim();
+            var phone = block.querySelector("#ath-sc-phone").checked;
+            var res = block.querySelector("#ath-sc-result");
+            var key = instanceTokenFor(instName);
+            if (!num) { res.style.color = "#ef4444"; res.textContent = "Preencha o número de destino acima."; return; }
+            if (!name) { res.style.color = "#ef4444"; res.textContent = "Preencha o nome do contato."; return; }
+            if (!key) { res.style.color = "#ef4444"; res.textContent = "Token da instância não detectado. Recarregue a página (F5) e tente de novo."; return; }
+            res.style.color = "#a3a3a3"; res.textContent = "Salvando...";
+            fetch("/user/savecontact", {
+              method: "POST",
+              headers: { apikey: key, "Content-Type": "application/json" },
+              body: JSON.stringify({ number: num, fullName: name, saveOnPhone: phone }),
+            })
+              .then(async function (r) {
+                var t = await r.text();
+                if (r.ok) { res.style.color = "#10b981"; res.textContent = "OK: contato salvo. " + t; }
+                else { res.style.color = "#ef4444"; res.textContent = "Erro " + r.status + ": " + t; }
+              })
+              .catch(function (e) { res.style.color = "#ef4444"; res.textContent = "Falha: " + e.message; });
+          };
+        }
+        var scObs = new MutationObserver(injectSaveContact);
+        scObs.observe(document.documentElement, { childList: true, subtree: true });
+        setInterval(injectSaveContact, 700);
+      })();
+    </script>
+    <!-- [Athene] Página de Configurações da instância: adiciona (1) card de Proxy
+         (ver/definir/remover) usando POST|DELETE /instance/proxy/{id} e lendo o
+         proxy atual de /instance/info/{id}; (2) suporte a MÚLTIPLOS webhooks —
+         transforma o campo único "URL do Webhook" numa lista de N endereços,
+         sincronizando o input controlado do React (junta por \n) para reaproveitar
+         o botão "Salvar Webhook" já existente. O backend faz o fan-out da mesma
+         requisição para todos os endereços (webhook_producer.splitWebhookURLs).
+         Auth admin (apikey global) vem de localStorage["evolution-auth"].state.apiKey. -->
+    <script>
+      (function () {
+        var INPUT_CLS =
+          "w-full rounded-md border border-input bg-background px-3 py-2 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+        var BTN_PRI =
+          "inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90";
+        var BTN_SEC =
+          "inline-flex items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-accent";
+
+        function auth() {
+          try {
+            var a = JSON.parse(localStorage.getItem("evolution-auth"));
+            return (a && a.state) || a || {};
+          } catch (e) { return {}; }
+        }
+        function apiBase() {
+          var s = auth();
+          return ((s.apiUrl || "").replace(/\/$/, "")) || window.location.origin;
+        }
+        function adminKey() { return auth().apiKey || ""; }
+        function instId() {
+          var m = window.location.pathname.match(/instances\/([^\/]+)\/settings/);
+          return m ? m[1] : "";
+        }
+        function ensureStyle() {
+          if (document.getElementById("athene-cfg-style")) return;
+          var st = document.createElement("style");
+          st.id = "athene-cfg-style";
+          st.textContent =
+            ".athl{display:block;font-size:11px;color:var(--muted-foreground,#a3a3a3);margin-bottom:4px}" +
+            "#athene-wh-multi .athrm{flex:0 0 auto;padding-left:12px;padding-right:12px}";
+          document.head.appendChild(st);
+        }
+        function findLeaf(txt) {
+          var els = document.querySelectorAll("h1,h2,h3,h4,p,span,div,label");
+          for (var i = 0; i < els.length; i++) {
+            if (els[i].children.length === 0 && els[i].textContent.trim() === txt) return els[i];
+          }
+          return null;
+        }
+        function commonAncestor(a, b) {
+          var anc = [], n = a;
+          while (n) { anc.push(n); n = n.parentElement; }
+          n = b;
+          while (n) { if (anc.indexOf(n) > -1) return n; n = n.parentElement; }
+          return document.body;
+        }
+        function childContaining(col, el) {
+          var n = el;
+          while (n && n.parentElement !== col) n = n.parentElement;
+          return n;
+        }
+        function setNativeValue(el, value) {
+          var proto = el.tagName === "TEXTAREA"
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype;
+          var d = Object.getOwnPropertyDescriptor(proto, "value");
+          if (d && d.set) d.set.call(el, value); else el.value = value;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        // ---------- (1) Card de Proxy ----------
+        function injectProxy() {
+          var id = instId();
+          if (!id) return;
+          if (document.getElementById("athene-proxy-card")) return;
+          var whHead = findLeaf("Configurações de Webhook");
+          var advHead = findLeaf("Configurações Avançadas");
+          if (!whHead || !advHead) return;
+          var col = commonAncestor(whHead, advHead);
+          var whCard = childContaining(col, whHead);
+          if (!whCard || whCard.parentElement !== col) return;
+
+          var card = document.createElement("div");
+          card.id = "athene-proxy-card";
+          card.className = whCard.className; // mesma aparência dos demais cards
+          card.innerHTML =
+            '<h3 style="font-weight:600;font-size:1.05rem;margin-bottom:4px">Configurações de Proxy</h3>' +
+            '<p id="athp-status" style="font-size:12px;margin-bottom:12px;color:var(--muted-foreground,#a3a3a3)">Carregando…</p>' +
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+            '<div><label class="athl">Host</label><input id="athp-host" class="' + INPUT_CLS + '" placeholder="ex.: 172.18.0.1"></div>' +
+            '<div><label class="athl">Porta</label><input id="athp-port" class="' + INPUT_CLS + '" placeholder="ex.: 20326"></div>' +
+            '<div><label class="athl">Protocolo</label><select id="athp-proto" class="' + INPUT_CLS + '"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select></div>' +
+            '<div><label class="athl">Usuário (opcional)</label><input id="athp-user" class="' + INPUT_CLS + '" placeholder="vazio se sem auth"></div>' +
+            '<div style="grid-column:1/3"><label class="athl">Senha (opcional)</label><input id="athp-pass" type="password" class="' + INPUT_CLS + '" placeholder="vazio se sem auth"></div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">' +
+            '<button id="athp-del" type="button" class="' + BTN_SEC + '">Remover Proxy</button>' +
+            '<button id="athp-save" type="button" class="' + BTN_PRI + '">Salvar Proxy</button>' +
+            '</div>' +
+            '<div id="athp-res" style="font-size:12px;margin-top:8px;min-height:16px;word-break:break-word"></div>';
+          col.insertBefore(card, whCard); // proxy logo acima do card de webhook
+
+          var host = card.querySelector("#athp-host"),
+            port = card.querySelector("#athp-port"),
+            proto = card.querySelector("#athp-proto"),
+            user = card.querySelector("#athp-user"),
+            pass = card.querySelector("#athp-pass"),
+            status = card.querySelector("#athp-status"),
+            res = card.querySelector("#athp-res");
+
+          function setRes(color, msg) { res.style.color = color; res.textContent = msg; }
+          function loadProxy() {
+            fetch(apiBase() + "/instance/info/" + id, { headers: { apikey: adminKey() } })
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                var inst = (j && j.data) || {};
+                var p = {};
+                try { p = inst.proxy ? JSON.parse(inst.proxy) : {}; } catch (e) { p = {}; }
+                if (p && p.host) {
+                  host.value = p.host || "";
+                  port.value = p.port || "";
+                  if (p.protocol) proto.value = p.protocol;
+                  user.value = p.username || "";
+                  pass.value = p.password || "";
+                  status.style.color = "#10b981";
+                  status.textContent = "Proxy atual: " + (p.protocol || "http") + "://" + (p.username ? "***@" : "") + p.host + ":" + p.port;
+                } else {
+                  status.style.color = "var(--muted-foreground,#a3a3a3)";
+                  status.textContent = "Nenhum proxy configurado nesta instância.";
+                }
+              })
+              .catch(function (e) { status.style.color = "#ef4444"; status.textContent = "Falha ao ler proxy: " + e.message; });
+          }
+          card.querySelector("#athp-save").onclick = function () {
+            var h = host.value.trim(), pt = port.value.trim();
+            if (!h || !pt) { setRes("#ef4444", "Host e porta são obrigatórios."); return; }
+            setRes("#a3a3a3", "Salvando… (a instância vai reconectar para aplicar)");
+            fetch(apiBase() + "/instance/proxy/" + id, {
+              method: "POST",
+              headers: { apikey: adminKey(), "Content-Type": "application/json" },
+              body: JSON.stringify({ host: h, port: pt, protocol: proto.value || "http", username: user.value.trim(), password: pass.value }),
+            })
+              .then(async function (r) {
+                var t = await r.text();
+                if (r.ok) { setRes("#10b981", "Proxy salvo. Reconectando para aplicar…"); loadProxy(); }
+                else setRes("#ef4444", "Erro " + r.status + ": " + t);
+              })
+              .catch(function (e) { setRes("#ef4444", "Falha: " + e.message); });
+          };
+          card.querySelector("#athp-del").onclick = function () {
+            setRes("#a3a3a3", "Removendo…");
+            fetch(apiBase() + "/instance/proxy/" + id, { method: "DELETE", headers: { apikey: adminKey() } })
+              .then(async function (r) {
+                var t = await r.text();
+                if (r.ok) {
+                  host.value = ""; port.value = ""; user.value = ""; pass.value = ""; proto.value = "http";
+                  setRes("#10b981", "Proxy removido. Reconectando…"); loadProxy();
+                } else setRes("#ef4444", "Erro " + r.status + ": " + t);
+              })
+              .catch(function (e) { setRes("#ef4444", "Falha: " + e.message); });
+          };
+          loadProxy();
+        }
+
+        // ---------- (2) Múltiplos webhooks ----------
+        function injectWebhookMulti() {
+          if (!instId()) return;
+          var inp = null, inputs = document.querySelectorAll("input");
+          for (var i = 0; i < inputs.length; i++) {
+            if (/webhook/i.test(inputs[i].getAttribute("placeholder") || "")) { inp = inputs[i]; break; }
+          }
+          if (!inp || inp.dataset.atheneMulti === "1") return;
+          inp.dataset.atheneMulti = "1";
+          inp.style.display = "none";
+
+          var wrap = document.createElement("div");
+          wrap.id = "athene-wh-multi";
+          inp.parentElement.insertBefore(wrap, inp.nextSibling);
+
+          var urls = (inp.value || "").split(/[\n,;]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s && s.toLowerCase() !== "disabled"; });
+          if (urls.length === 0) urls = [""];
+
+          function sync() {
+            // [Athene] Com o update parcial (PR#136), webhookUrl vazio PRESERVA o
+            // valor atual. Para limpar todos os webhooks, enviamos "disabled".
+            var clean = urls.map(function (s) { return s.trim(); }).filter(Boolean);
+            setNativeValue(inp, clean.length ? clean.join("\n") : "disabled");
+          }
+          function render() {
+            wrap.innerHTML = "";
+            urls.forEach(function (u, idx) {
+              var row = document.createElement("div");
+              row.style.cssText = "display:flex;gap:6px;margin-bottom:6px";
+              var ri = document.createElement("input");
+              ri.className = INPUT_CLS; ri.value = u;
+              ri.placeholder = "https://seu-servidor.com/webhook";
+              ri.oninput = function () { urls[idx] = ri.value; sync(); };
+              var rm = document.createElement("button");
+              rm.type = "button"; rm.textContent = "✕";
+              rm.className = BTN_SEC + " athrm";
+              rm.title = "Remover este endereço";
+              rm.onclick = function () { urls.splice(idx, 1); if (urls.length === 0) urls = [""]; sync(); render(); };
+              row.appendChild(ri); row.appendChild(rm); wrap.appendChild(row);
+            });
+            var add = document.createElement("button");
+            add.type = "button"; add.textContent = "+ Adicionar webhook"; add.className = BTN_SEC;
+            add.onclick = function () { urls.push(""); render(); };
+            wrap.appendChild(add);
+            var hint = document.createElement("p");
+            hint.style.cssText = "font-size:11px;margin-top:6px;color:var(--muted-foreground,#a3a3a3)";
+            hint.textContent = 'A MESMA requisição é enviada para todos os endereços. Clique em "Salvar Webhook" (abaixo) para aplicar.';
+            wrap.appendChild(hint);
+          }
+          render(); // não faz sync() inicial para não sobrescrever o valor já vindo do React
+        }
+
+        function tick() { ensureStyle(); injectProxy(); injectWebhookMulti(); }
+        var obs = new MutationObserver(tick);
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        document.addEventListener("DOMContentLoaded", tick);
+        setInterval(tick, 800);
+      })();
+    </script>
   </body>
 </html>

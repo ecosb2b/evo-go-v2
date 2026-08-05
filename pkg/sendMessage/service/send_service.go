@@ -14,6 +14,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/evolution-foundation/evolution-go/pkg/utils"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -43,10 +45,12 @@ type SendService interface {
 	SendPoll(data *PollStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendSticker(data *StickerStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendLocation(data *LocationStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
+	SendEvent(data *EventStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendContact(data *ContactStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendButton(data *ButtonStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendList(data *ListStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendCarousel(data *CarouselStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
+	SendProduct(data *ProductStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendStatusText(data *StatusTextStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendStatusMediaUrl(data *StatusMediaStruct, instance *instance_model.Instance) (*MessageSendStruct, error)
 	SendStatusMediaFile(data *StatusMediaStruct, fileData []byte, instance *instance_model.Instance) (*MessageSendStruct, error)
@@ -229,9 +233,9 @@ type ButtonStruct struct {
 	FormatJid *bool `json:"formatJid,omitempty"`
 	// Quoted (reply-to) context.
 	Quoted QuotedStruct `json:"quoted,omitempty"`
-	// Optional image URL used as header for reply-only buttons.
+	// Optional image URL used as message header (reply and CTA buttons).
 	ImageUrl string `json:"imageUrl,omitempty"`
-	// Optional video URL used as header for reply-only buttons.
+	// Optional video URL used as message header (reply and CTA buttons).
 	VideoUrl string `json:"videoUrl,omitempty"`
 }
 
@@ -380,7 +384,9 @@ type MessageSendStruct struct {
 }
 
 func (s *sendService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
+	whatsmeow_service.ClientMapsMu.RLock()
 	client := s.clientPointer[instanceId]
+	whatsmeow_service.ClientMapsMu.RUnlock()
 	s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
 
 	if client == nil {
@@ -394,7 +400,9 @@ func (s *sendService) ensureClientConnected(instanceId string) (*whatsmeow.Clien
 		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
 		time.Sleep(2 * time.Second)
 
+		whatsmeow_service.ClientMapsMu.RLock()
 		client = s.clientPointer[instanceId]
+		whatsmeow_service.ClientMapsMu.RUnlock()
 		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
 			instanceId,
 			client != nil,
@@ -1601,40 +1609,114 @@ func convertToWebP(imageData string) ([]byte, error) {
 	return webpBuffer.Bytes(), nil
 }
 
+// convertBytesToWebP re-encodes a STATIC image (jpeg/png/...) already in memory into WebP. Never
+// call with data that is already WebP — the decoder fails on animated WebP ("webpDecodeRGBA: failed")
+// and would flatten a static WebP to a single frame anyway.
+func convertBytesToWebP(data []byte) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %v", err)
+	}
+	var webpBuffer bytes.Buffer
+	if err := webp.Encode(&webpBuffer, img, &webp.Options{Lossless: false, Quality: 80}); err != nil {
+		return nil, fmt.Errorf("failed to encode image to WebP: %v", err)
+	}
+	return webpBuffer.Bytes(), nil
+}
+
+// isWebP checks the RIFF/WEBP magic bytes.
+func isWebP(data []byte) bool {
+	return len(data) >= 12 && bytes.Equal(data[0:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP"))
+}
+
+// isAnimatedWebP: an animated WebP carries a VP8X chunk (right after the 12-byte RIFF header) with
+// the Animation flag (bit 0x02) set; the ANIM chunk scan is a belt-and-suspenders fallback.
+func isAnimatedWebP(data []byte) bool {
+	if !isWebP(data) {
+		return false
+	}
+	if len(data) >= 21 && bytes.Equal(data[12:16], []byte("VP8X")) && data[20]&0x02 != 0 {
+		return true
+	}
+	return bytes.Contains(data, []byte("ANIM"))
+}
+
+const stickerDownloadMaxBytes = 16 << 20 // 16 MiB
+
+var stickerHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+func fetchStickerData(ctx context.Context, rawURL string) ([]byte, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid sticker URL")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sticker request: %w", err)
+	}
+	resp, err := stickerHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch sticker from URL: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("failed to fetch sticker from URL: HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, stickerDownloadMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read sticker data: %w", err)
+	}
+	if len(data) > stickerDownloadMaxBytes {
+		return nil, fmt.Errorf("sticker exceeds %d byte download limit", stickerDownloadMaxBytes)
+	}
+	return data, nil
+}
+
 func (s *sendService) SendSticker(data *StickerStruct, instance *instance_model.Instance) (*MessageSendStruct, error) {
 	client, err := s.ensureClientConnected(instance.Id)
 	if err != nil {
 		return nil, err
 	}
 
-	var uploaded whatsmeow.UploadResponse
-	var filedata []byte
+	raw, err := fetchStickerData(context.Background(), data.Sticker)
+	if err != nil {
+		return nil, err
+	}
 
-	if strings.HasPrefix(data.Sticker, "http") {
-		webpData, err := convertToWebP(data.Sticker)
+	// Stickers on WhatsApp are already WebP: upload UNTOUCHED (re-encoding both fails on animated
+	// WebP and would flatten it to one frame). Only convert when the source is some other format.
+	var filedata []byte
+	isAnimated := false
+	if isWebP(raw) {
+		filedata = raw
+		isAnimated = isAnimatedWebP(raw)
+	} else {
+		filedata, err = convertBytesToWebP(raw)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert image to WebP: %v", err)
 		}
-
-		filedata = webpData
-
-		uploaded, err = client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
-		if err != nil {
-			return nil, fmt.Errorf("failed to upload sticker: %v", err)
-		}
-	} else {
-		return nil, fmt.Errorf("invalid sticker URL")
 	}
 
-	msg := &waE2E.Message{StickerMessage: &waE2E.StickerMessage{
+	uploaded, err := client.Upload(context.Background(), filedata, whatsmeow.MediaImage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload sticker: %v", err)
+	}
+
+	stickerMsg := &waE2E.StickerMessage{
 		URL:           proto.String(uploaded.URL),
 		DirectPath:    proto.String(uploaded.DirectPath),
 		MediaKey:      uploaded.MediaKey,
-		Mimetype:      proto.String(http.DetectContentType(filedata)),
+		Mimetype:      proto.String("image/webp"), // output is always webp now
 		FileEncSHA256: uploaded.FileEncSHA256,
 		FileSHA256:    uploaded.FileSHA256,
 		FileLength:    proto.Uint64(uint64(len(filedata))),
-	}}
+	}
+	if isAnimated {
+		stickerMsg.IsAnimated = proto.Bool(true)
+	}
+	msg := &waE2E.Message{StickerMessage: stickerMsg}
 
 	message, err := s.SendMessage(instance, msg, "StickerMessage", &SendDataStruct{
 		Id:           data.Id,
@@ -1783,16 +1865,19 @@ func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.In
 			jsonBytes, _ := json.Marshal(map[string]string{"display_text": v.DisplayText, "id": v.Id})
 			paramsJSON = proto.String(string(jsonBytes))
 		case "copy":
+			// Molde capturado de payload REAL que renderiza (BTN-DEBUG 2026-07-15,
+			// enviado por evolution-api v2): {"fix":true,"display_text":...,"copy_code":...}
+			// — nessa ordem, com "fix":true e SEM "id".
 			name = proto.String("cta_copy")
 			copyCode := v.CopyCode
 			if copyCode == "" {
 				copyCode = v.Id
 			}
-			copyId := v.Id
-			if copyId == "" {
-				copyId = "copy_" + strconv.FormatInt(time.Now().UnixNano(), 10)
-			}
-			jsonBytes, _ := json.Marshal(map[string]string{"display_text": v.DisplayText, "id": copyId, "copy_code": copyCode})
+			jsonBytes, _ := json.Marshal(struct {
+				Fix         bool   `json:"fix"`
+				DisplayText string `json:"display_text"`
+				CopyCode    string `json:"copy_code"`
+			}{true, v.DisplayText, copyCode})
 			paramsJSON = proto.String(string(jsonBytes))
 		case "url":
 			name = proto.String("cta_url")
@@ -1845,8 +1930,13 @@ func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.In
 		})
 	}
 
-	templateId := strconv.FormatInt(time.Now().UnixNano()/1000000, 10)
-	messageParamsJSON := `{"from":"api","templateId":` + templateId + `}`
+	// FIX (2026-07-15): molde Evolution API v2 (Baileys, referência confirmada em
+	// produção). O buttonMessage oficial do evolution-api envia SEMPRE
+	// `messageParamsJson: JSON.stringify({ from: 'api', templateId: v4() })` para
+	// TODOS os tipos de botão (reply/copy/url/call/pix). O formato anterior
+	// (`{"native_flow_name":...,"version":1}`) era um palpite e não corresponde a
+	// nenhum payload real disparado por implementação funcional.
+	messageParamsJSON := `{"from":"api","templateId":"` + uuid.NewString() + `"}`
 
 	// MessageSecret (32 random bytes) — required for iOS to render interactive messages.
 	btnMsgSecret := make([]byte, 32)
@@ -1855,132 +1945,36 @@ func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.In
 	var msg *waE2E.Message
 	var msgType string
 
-	if hasReply && !hasOtherTypes && !hasPix {
-		// Reply-only: native ButtonsMessage wrapped in DocumentWithCaptionMessage (Baileys PR #36).
-		var replyButtons []*waE2E.ButtonsMessage_Button
-		for _, v := range data.Buttons {
-			replyButtons = append(replyButtons, &waE2E.ButtonsMessage_Button{
-				ButtonID: proto.String(v.Id),
-				ButtonText: &waE2E.ButtonsMessage_Button_ButtonText{
-					DisplayText: proto.String(v.DisplayText),
-				},
-				Type: waE2E.ButtonsMessage_Button_RESPONSE.Enum(),
-			})
-		}
-
-		buttonsMsg := &waE2E.ButtonsMessage{
-			ContentText: proto.String(data.Description),
-			FooterText:  proto.String(data.Footer),
-			HeaderType:  waE2E.ButtonsMessage_EMPTY.Enum(),
-			Buttons:     replyButtons,
-		}
-
-		// Optional media header (image or video URL).
-		if data.ImageUrl != "" {
-			if resp, err := http.Get(data.ImageUrl); err == nil {
-				fileData, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if readErr == nil {
-					if uploaded, upErr := client.Upload(context.Background(), fileData, whatsmeow.MediaImage); upErr == nil {
-						buttonsMsg.HeaderType = waE2E.ButtonsMessage_IMAGE.Enum()
-						buttonsMsg.Header = &waE2E.ButtonsMessage_ImageMessage{
-							ImageMessage: &waE2E.ImageMessage{
-								URL:           proto.String(uploaded.URL),
-								DirectPath:    proto.String(uploaded.DirectPath),
-								MediaKey:      uploaded.MediaKey,
-								Mimetype:      proto.String("image/jpeg"),
-								FileEncSHA256: uploaded.FileEncSHA256,
-								FileSHA256:    uploaded.FileSHA256,
-								FileLength:    proto.Uint64(uint64(len(fileData))),
-							},
-						}
-					}
-				}
-			}
-		} else if data.VideoUrl != "" {
-			if resp, err := http.Get(data.VideoUrl); err == nil {
-				fileData, readErr := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if readErr == nil {
-					if uploaded, upErr := client.Upload(context.Background(), fileData, whatsmeow.MediaVideo); upErr == nil {
-						buttonsMsg.HeaderType = waE2E.ButtonsMessage_VIDEO.Enum()
-						buttonsMsg.Header = &waE2E.ButtonsMessage_VideoMessage{
-							VideoMessage: &waE2E.VideoMessage{
-								URL:           proto.String(uploaded.URL),
-								DirectPath:    proto.String(uploaded.DirectPath),
-								MediaKey:      uploaded.MediaKey,
-								Mimetype:      proto.String("video/mp4"),
-								FileEncSHA256: uploaded.FileEncSHA256,
-								FileSHA256:    uploaded.FileSHA256,
-								FileLength:    proto.Uint64(uint64(len(fileData))),
-							},
-						}
-					}
-				}
-			}
-		}
-
-		msg = &waE2E.Message{
-			DocumentWithCaptionMessage: &waE2E.FutureProofMessage{
-				Message: &waE2E.Message{
-					ButtonsMessage: buttonsMsg,
-				},
-			},
-			MessageContextInfo: &waE2E.MessageContextInfo{
-				MessageSecret: btnMsgSecret,
-			},
-		}
-		msgType = "ButtonsMessage"
-	} else if hasPix {
-		// Pix: NativeFlowMessage wrapped in DocumentWithCaptionMessage.
-		paymentMsgParams := `{"native_flow_name":"order_details","version":1}`
-
+	// FIX (2026-07-15): o caminho reply-only usava ButtonsMessage dentro de
+	// DocumentWithCaptionMessage (workaround Baileys PR #36) + nodes <biz>/<bot>
+	// injetados — o servidor passou a rejeitar com erro 405. O evolution-api v2
+	// NÃO usa ButtonsMessage: botões reply vão pelo MESMO caminho interativo dos
+	// CTAs (viewOnceMessage.interactiveMessage.nativeFlowMessage com quick_reply).
+	// Reply agora cai no branch else abaixo, junto com copy/url/call.
+	if hasPix {
+		// Pix: molde Evolution API v2 (Baileys) — InteractiveMessage/NativeFlowMessage
+		// embrulhado em ViewOnceMessage (FutureProofMessage).
+		//
+		// FIX (2026-07-15): o buttonMessage do evolution-api monta TODOS os botões
+		// (inclusive pix) como `viewOnceMessage.message.interactiveMessage` e dispara
+		// via relayMessage. O normalizeMessageContent do Baileys/WhatsApp desembrulha
+		// o viewOnce antes de renderizar; sem esse wrapper o celular não renderiza a
+		// mensagem interativa. Envio top-level (tentativa anterior) e wrapper
+		// DocumentWithCaption (tentativa de 2026-07-14) estavam ambos fora do molde.
 		var interactiveBody *waE2E.InteractiveMessage_Body
 		if data.Title != "" {
-			bodyText := data.Title
-			interactiveBody = &waE2E.InteractiveMessage_Body{Text: &bodyText}
+			interactiveBody = &waE2E.InteractiveMessage_Body{Text: proto.String(data.Title)}
 		}
 
 		msg = &waE2E.Message{
-			DocumentWithCaptionMessage: &waE2E.FutureProofMessage{
+			ViewOnceMessage: &waE2E.FutureProofMessage{
 				Message: &waE2E.Message{
+					MessageContextInfo: &waE2E.MessageContextInfo{
+						DeviceListMetadata:        &waE2E.DeviceListMetadata{},
+						DeviceListMetadataVersion: proto.Int32(2),
+					},
 					InteractiveMessage: &waE2E.InteractiveMessage{
 						Body: interactiveBody,
-						InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
-							NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
-								Buttons:           buttons,
-								MessageParamsJSON: &paymentMsgParams,
-								MessageVersion:    proto.Int32(1),
-							},
-						},
-					},
-				},
-			},
-			MessageContextInfo: &waE2E.MessageContextInfo{
-				MessageSecret: btnMsgSecret,
-			},
-		}
-		msgType = "InteractiveMessage"
-	} else {
-		// Mixed CTA buttons (url/copy/call): NativeFlowMessage wrapped in DocumentWithCaptionMessage.
-		body := func() string {
-			t := "*" + data.Title + "*"
-			if data.Description != "" {
-				t += "\n\n" + data.Description + "\n"
-			}
-			return t
-		}()
-
-		msg = &waE2E.Message{
-			DocumentWithCaptionMessage: &waE2E.FutureProofMessage{
-				Message: &waE2E.Message{
-					InteractiveMessage: &waE2E.InteractiveMessage{
-						Body: &waE2E.InteractiveMessage_Body{
-							Text: &body,
-						},
-						Footer: &waE2E.InteractiveMessage_Footer{
-							Text: &data.Footer,
-						},
 						InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
 							NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
 								Buttons:           buttons,
@@ -1996,69 +1990,137 @@ func (s *sendService) SendButton(data *ButtonStruct, instance *instance_model.In
 			},
 		}
 		msgType = "InteractiveMessage"
-	}
-
-	// Build biz/bot nodes injected directly in the XMPP stanza — required for mobile rendering.
-	// Reply-only buttons get <biz><buttons/></biz>; CTA/Pix get <biz><interactive type="native_flow" v="1"><native_flow name="X"/></interactive></biz>.
-	// The <bot biz_bot="1"/> node is required for 1:1 chats (skipped on groups).
-	var bizInteractiveContent waBinary.Node
-	if hasReply && !hasOtherTypes && !hasPix {
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
-			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
-			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "quick_reply",
-				},
-			}},
-		}
-	} else if hasPix {
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
-			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
-			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "payment_info",
-				},
-			}},
-		}
 	} else {
-		// Mixed CTA buttons (url/copy/call) — name="mixed" is the WhatsApp convention.
-		bizInteractiveContent = waBinary.Node{
-			Tag: "interactive",
-			Attrs: waBinary.Attrs{
-				"type": "native_flow",
-				"v":    "1",
+		// Reply (quick_reply) e CTA (url/copy/call).
+		//
+		// FIX (2026-07-15, definitivo): molde copiado de um payload REAL capturado
+		// via [BTN-DEBUG] — cta_copy enviado por evolution-api v2 que RENDERIZA no
+		// celular. A mensagem que funciona é MINIMALISTA:
+		//   Message.interactiveMessage (TOP-LEVEL, sem viewOnceMessage)
+		//     .body.text
+		//     .nativeFlowMessage.buttons[] (SEM messageParamsJson, SEM messageVersion)
+		// O wrapper viewOnce + messageParamsJson/messageVersion (tentativas
+		// anteriores) eram exatamente o que impedia a renderização.
+		body := func() string {
+			t := "*" + data.Title + "*"
+			if data.Description != "" {
+				t += "\n\n" + data.Description + "\n"
+			}
+			return t
+		}()
+
+		interactive := &waE2E.InteractiveMessage{
+			Body: &waE2E.InteractiveMessage_Body{
+				Text: proto.String(body),
 			},
-			Content: []waBinary.Node{{
-				Tag: "native_flow",
-				Attrs: waBinary.Attrs{
-					"name": "mixed",
+			InteractiveMessage: &waE2E.InteractiveMessage_NativeFlowMessage_{
+				NativeFlowMessage: &waE2E.InteractiveMessage_NativeFlowMessage{
+					Buttons: buttons,
 				},
-			}},
+			},
 		}
+
+		// Footer opcional: o payload de referência que renderiza não tem footer;
+		// só incluímos quando o usuário pedir explicitamente.
+		if data.Footer != "" {
+			interactive.Footer = &waE2E.InteractiveMessage_Footer{
+				Text: proto.String(data.Footer),
+			}
+		}
+
+		// Header de mídia opcional (equivale ao `thumbnailUrl` do evolution-api:
+		// header com hasMediaAttachment=true + imageMessage/videoMessage).
+		if data.ImageUrl != "" {
+			if resp, err := http.Get(data.ImageUrl); err == nil {
+				fileData, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if readErr == nil {
+					if uploaded, upErr := client.Upload(context.Background(), fileData, whatsmeow.MediaImage); upErr == nil {
+						interactive.Header = &waE2E.InteractiveMessage_Header{
+							HasMediaAttachment: proto.Bool(true),
+							Media: &waE2E.InteractiveMessage_Header_ImageMessage{
+								ImageMessage: &waE2E.ImageMessage{
+									URL:           proto.String(uploaded.URL),
+									DirectPath:    proto.String(uploaded.DirectPath),
+									MediaKey:      uploaded.MediaKey,
+									Mimetype:      proto.String("image/jpeg"),
+									FileEncSHA256: uploaded.FileEncSHA256,
+									FileSHA256:    uploaded.FileSHA256,
+									FileLength:    proto.Uint64(uint64(len(fileData))),
+									JPEGThumbnail: makeJPEGThumbnail(fileData, 72),
+								},
+							},
+						}
+					}
+				}
+			}
+		} else if data.VideoUrl != "" {
+			if resp, err := http.Get(data.VideoUrl); err == nil {
+				fileData, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if readErr == nil {
+					if uploaded, upErr := client.Upload(context.Background(), fileData, whatsmeow.MediaVideo); upErr == nil {
+						interactive.Header = &waE2E.InteractiveMessage_Header{
+							HasMediaAttachment: proto.Bool(true),
+							Media: &waE2E.InteractiveMessage_Header_VideoMessage{
+								VideoMessage: &waE2E.VideoMessage{
+									URL:           proto.String(uploaded.URL),
+									DirectPath:    proto.String(uploaded.DirectPath),
+									MediaKey:      uploaded.MediaKey,
+									Mimetype:      proto.String("video/mp4"),
+									FileEncSHA256: uploaded.FileEncSHA256,
+									FileSHA256:    uploaded.FileSHA256,
+									FileLength:    proto.Uint64(uint64(len(fileData))),
+								},
+							},
+						}
+					}
+				}
+			}
+		}
+
+		// Envelope mínimo, byte-idêntico ao payload de referência que renderiza:
+		// SEM messageContextInfo (sem messageSecret), SEM contextInfo, SEM
+		// deviceListMetadata. Com SendReportingTokens desligado o whatsmeow não
+		// injeta nada além disso.
+		msg = &waE2E.Message{
+			InteractiveMessage: interactive,
+		}
+		msgType = "InteractiveMessage"
 	}
 
-	bizNodes := []waBinary.Node{
-		{
-			Tag:     "biz",
-			Content: []waBinary.Node{bizInteractiveContent},
-		},
+	// FIX (2026-07-15, DEFINITIVO): injetar o node <biz> no stanza XMPP no MESMO
+	// formato do fork Baileys 7.0.0-rc.9 (imagem mfilype/evolution-buttons, que
+	// renderiza botões perfeitamente). Extraído de
+	// node_modules/baileys/lib/Socket/messages-send.js (getButtonArgs):
+	//
+	//   PIX (payment_info): <biz><interactive type="native_flow" v="1">
+	//                         <native_flow name="payment_info"/></interactive></biz>
+	//   Demais (cta_copy/url/call/quick_reply):
+	//                       <biz><interactive type="native_flow" v="1">
+	//                         <native_flow v="2" name="mixed"/></interactive></biz>
+	//
+	// Detalhes que faltavam nas tentativas anteriores: o native_flow leva
+	// v="2" e name="mixed" (NÃO o nome do tipo do botão), e nenhum node <bot>
+	// é anexado. Este é o único delta real entre o EvoGO e o fork que funciona.
+	nativeFlowNode := waBinary.Node{
+		Tag:   "native_flow",
+		Attrs: waBinary.Attrs{"v": "2", "name": "mixed"},
 	}
-	if !strings.Contains(data.Number, "@g.us") {
-		bizNodes = append(bizNodes, waBinary.Node{
-			Tag:   "bot",
-			Attrs: waBinary.Attrs{"biz_bot": "1"},
-		})
+	if hasPix {
+		nativeFlowNode = waBinary.Node{
+			Tag:   "native_flow",
+			Attrs: waBinary.Attrs{"name": "payment_info"},
+		}
 	}
+	bizNodes := []waBinary.Node{{
+		Tag: "biz",
+		Content: []waBinary.Node{{
+			Tag:     "interactive",
+			Attrs:   waBinary.Attrs{"type": "native_flow", "v": "1"},
+			Content: []waBinary.Node{nativeFlowNode},
+		}},
+	}}
 
 	// Route through centralized SendMessage for ContextInfo, webhooks, quotes, mentions.
 	message, err := s.SendMessage(instance, msg, msgType, &SendDataStruct{
@@ -2358,9 +2420,17 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 
 	s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Recipient validated: %s (Server: %s)", instance.Id, recipient.String(), recipient.Server)
 
+	// [Athene/PR#127] Busca o client uma vez para todo o envio: o read do map é
+	// guardado, mas um envio roda contra um único client, então evitamos re-ler o
+	// map (e potencialmente correr com um reconnect concorrente no meio do envio)
+	// em cada uma das chamadas abaixo.
+	whatsmeow_service.ClientMapsMu.RLock()
+	sendMessageClient := s.clientPointer[instance.Id]
+	whatsmeow_service.ClientMapsMu.RUnlock()
+
 	var message string
 	if data.Id == "" {
-		message = s.clientPointer[instance.Id].GenerateMessageID()
+		message = sendMessageClient.GenerateMessageID()
 	} else {
 		message = data.Id
 	}
@@ -2371,14 +2441,14 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 			media = "audio"
 		}
 
-		err := s.clientPointer[instance.Id].SendChatPresence(context.Background(), recipient, types.ChatPresence("composing"), types.ChatPresenceMedia(media))
+		err := sendMessageClient.SendChatPresence(context.Background(), recipient, types.ChatPresence("composing"), types.ChatPresenceMedia(media))
 		if err != nil {
 			return nil, err
 		}
 
 		time.Sleep(time.Duration(data.Delay) * time.Millisecond)
 
-		err = s.clientPointer[instance.Id].SendChatPresence(context.Background(), recipient, types.ChatPresence("paused"), types.ChatPresenceMedia(media))
+		err = sendMessageClient.SendChatPresence(context.Background(), recipient, types.ChatPresence("paused"), types.ChatPresenceMedia(media))
 		if err != nil {
 			return nil, err
 		}
@@ -2469,6 +2539,15 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 					Participant:   proto.String(data.Quoted.Participant),
 					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
 				}
+			} else if msg.ViewOnceMessage != nil &&
+				msg.ViewOnceMessage.Message != nil &&
+				msg.ViewOnceMessage.Message.InteractiveMessage != nil {
+				// Botões CTA/Pix vêm embrulhados em ViewOnceMessage (molde Evolution API v2).
+				msg.ViewOnceMessage.Message.InteractiveMessage.ContextInfo = &waE2E.ContextInfo{
+					StanzaID:      proto.String(data.Quoted.MessageID),
+					Participant:   proto.String(data.Quoted.Participant),
+					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
+				}
 			} else if msg.DocumentWithCaptionMessage != nil &&
 				msg.DocumentWithCaptionMessage.Message != nil &&
 				msg.DocumentWithCaptionMessage.Message.InteractiveMessage != nil {
@@ -2505,6 +2584,24 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 				msg.DocumentWithCaptionMessage.Message != nil &&
 				msg.DocumentWithCaptionMessage.Message.ButtonsMessage != nil {
 				msg.DocumentWithCaptionMessage.Message.ButtonsMessage.ContextInfo = &waE2E.ContextInfo{
+					StanzaID:      proto.String(data.Quoted.MessageID),
+					Participant:   proto.String(data.Quoted.Participant),
+					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
+				}
+			}
+		case "ProductMessage":
+			// [Athene] Card de produto do catálogo
+			if msg.ProductMessage != nil {
+				msg.ProductMessage.ContextInfo = &waE2E.ContextInfo{
+					StanzaID:      proto.String(data.Quoted.MessageID),
+					Participant:   proto.String(data.Quoted.Participant),
+					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
+				}
+			}
+		case "EventMessage":
+			// [Athene] Evento/agenda (PR #90)
+			if msg.EventMessage != nil {
+				msg.EventMessage.ContextInfo = &waE2E.ContextInfo{
 					StanzaID:      proto.String(data.Quoted.MessageID),
 					Participant:   proto.String(data.Quoted.Participant),
 					QuotedMessage: &waE2E.Message{Conversation: proto.String("")},
@@ -2550,6 +2647,16 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 			// ContextInfo already set in SendList
 		case "ButtonsMessage":
 			// Reply-only buttons: ContextInfo already set in SendButton
+		case "ProductMessage":
+			// [Athene] Card de produto do catálogo
+			if msg.ProductMessage != nil {
+				msg.ProductMessage.ContextInfo = &waE2E.ContextInfo{}
+			}
+		case "EventMessage":
+			// [Athene] Evento/agenda (PR #90)
+			if msg.EventMessage != nil {
+				msg.EventMessage.ContextInfo = &waE2E.ContextInfo{}
+			}
 		default:
 			return nil, fmt.Errorf("invalid messageType: %s", messageType)
 		}
@@ -2616,6 +2723,12 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 			if msg.InteractiveMessage != nil && msg.InteractiveMessage.ContextInfo != nil {
 				msg.InteractiveMessage.ContextInfo.ForwardingScore = data.ForwardingScore
 				msg.InteractiveMessage.ContextInfo.IsForwarded = proto.Bool(true)
+			} else if msg.ViewOnceMessage != nil &&
+				msg.ViewOnceMessage.Message != nil &&
+				msg.ViewOnceMessage.Message.InteractiveMessage != nil &&
+				msg.ViewOnceMessage.Message.InteractiveMessage.ContextInfo != nil {
+				msg.ViewOnceMessage.Message.InteractiveMessage.ContextInfo.ForwardingScore = data.ForwardingScore
+				msg.ViewOnceMessage.Message.InteractiveMessage.ContextInfo.IsForwarded = proto.Bool(true)
 			}
 		case "ListMessage":
 			if msg.ListMessage != nil && msg.ListMessage.ContextInfo != nil {
@@ -2631,124 +2744,20 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 	// Only try to get participants for actual groups, not newsletters
 	if isGroup && !isNewsletter {
 		if data.MentionAll {
-			groupInfo, err := s.clientPointer[instance.Id].GetGroupInfo(context.Background(), recipient)
+			groupInfo, err := sendMessageClient.GetGroupInfo(context.Background(), recipient)
 			if err != nil {
 				return nil, err
 			}
 
 			var mentionedJIDs []string
 			for _, participant := range groupInfo.Participants {
-				mentionedJIDs = append(mentionedJIDs, participant.JID.String())
+				mentionedJIDs = append(mentionedJIDs, participantMentionJID(participant))
 			}
-
-			switch messageType {
-			case "ExtendedTextMessage":
-				if msg.ExtendedTextMessage.ContextInfo == nil {
-					msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ExtendedTextMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "ImageMessage":
-				if msg.ImageMessage.ContextInfo == nil {
-					msg.ImageMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ImageMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "VideoMessage":
-				if msg.VideoMessage.ContextInfo == nil {
-					msg.VideoMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.VideoMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "PtvMessage":
-				if msg.PtvMessage.ContextInfo == nil {
-					msg.PtvMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PtvMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "AudioMessage":
-				if msg.AudioMessage.ContextInfo == nil {
-					msg.AudioMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.AudioMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "DocumentMessage":
-				if msg.DocumentMessage.ContextInfo == nil {
-					msg.DocumentMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.DocumentMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "PollCreationMessage":
-				if msg.PollCreationMessage.ContextInfo == nil {
-					msg.PollCreationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PollCreationMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "StickerMessage":
-				if msg.StickerMessage.ContextInfo == nil {
-					msg.StickerMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.StickerMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "LocationMessage":
-				if msg.LocationMessage.ContextInfo == nil {
-					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.LocationMessage.ContextInfo.MentionedJID = mentionedJIDs
-			case "ContactMessage":
-				if msg.ContactMessage.ContextInfo == nil {
-					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ContactMessage.ContextInfo.MentionedJID = mentionedJIDs
-			}
-
+			setMessageMentionedJIDs(msg, messageType, mentionedJIDs)
 		}
 
 		if len(data.MentionedJID) > 0 {
-			switch messageType {
-			case "ExtendedTextMessage":
-				if msg.ExtendedTextMessage.ContextInfo == nil {
-					msg.ExtendedTextMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ExtendedTextMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "ImageMessage":
-				if msg.ImageMessage.ContextInfo == nil {
-					msg.ImageMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ImageMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "VideoMessage":
-				if msg.VideoMessage.ContextInfo == nil {
-					msg.VideoMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.VideoMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "PtvMessage":
-				if msg.PtvMessage.ContextInfo == nil {
-					msg.PtvMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PtvMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "AudioMessage":
-				if msg.AudioMessage.ContextInfo == nil {
-					msg.AudioMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.AudioMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "DocumentMessage":
-				if msg.DocumentMessage.ContextInfo == nil {
-					msg.DocumentMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.DocumentMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "PollCreationMessage":
-				if msg.PollCreationMessage.ContextInfo == nil {
-					msg.PollCreationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.PollCreationMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "StickerMessage":
-				if msg.StickerMessage.ContextInfo == nil {
-					msg.StickerMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.StickerMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "LocationMessage":
-				if msg.LocationMessage.ContextInfo == nil {
-					msg.LocationMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.LocationMessage.ContextInfo.MentionedJID = data.MentionedJID
-			case "ContactMessage":
-				if msg.ContactMessage.ContextInfo == nil {
-					msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
-				}
-				msg.ContactMessage.ContextInfo.MentionedJID = data.MentionedJID
-			}
+			setMessageMentionedJIDs(msg, messageType, data.MentionedJID)
 		}
 	}
 
@@ -2770,7 +2779,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 		sendExtra.AdditionalNodes = data.AdditionalNodes
 	}
 
-	response, err := s.clientPointer[instance.Id].SendMessage(context.Background(), recipient, msg, sendExtra)
+	response, err := sendMessageClient.SendMessage(context.Background(), recipient, msg, sendExtra)
 	if err != nil {
 		s.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Error sending message: %v", instance.Id, err)
 		return nil, err
@@ -2781,7 +2790,7 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 	messageInfo := types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     recipient,
-			Sender:   *s.clientPointer[instance.Id].Store.ID,
+			Sender:   *sendMessageClient.Store.ID,
 			IsFromMe: true,
 			IsGroup:  isGroup,
 		},
@@ -2835,15 +2844,15 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 		sticker := msg.GetStickerMessage()
 
 		if img != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), img)
+			data, err = sendMessageClient.Download(context.Background(), img)
 		} else if audio != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), audio)
+			data, err = sendMessageClient.Download(context.Background(), audio)
 		} else if document != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), document)
+			data, err = sendMessageClient.Download(context.Background(), document)
 		} else if video != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), video)
+			data, err = sendMessageClient.Download(context.Background(), video)
 		} else if sticker != nil {
-			data, err = s.clientPointer[instance.Id].Download(context.Background(), sticker)
+			data, err = sendMessageClient.Download(context.Background(), sticker)
 
 			webpReader := bytes.NewReader(data)
 			img, err := webp.Decode(webpReader)

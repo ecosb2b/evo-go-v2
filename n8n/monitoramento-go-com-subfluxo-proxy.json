@@ -1,0 +1,981 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "363c5de9-1765-4a4c-a2ed-0af1a97dcb0f",
+      "name": "A cada 10 min (Go)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        3408,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    c.*,\n    (\n        SELECT remote_jid\n        FROM whatsapp_outbox o\n        WHERE o.instance = c.instance_name\n          AND o.api_version = 'go'\n        ORDER BY created_at DESC\n        LIMIT 1\n    ) AS last_remote_jid\nFROM evolution_instance_monitor c\nWHERE c.enabled = true\n  AND c.api_version = 'go';",
+        "options": {}
+      },
+      "id": "01f104d3-3169-4bc6-8194-ee424eae1e49",
+      "name": "Carregar do Banco (Go)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        3632,
+        2368
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "95a27d2f-7770-47b2-b576-08277ab2fbf7",
+      "name": "Loop Instâncias (Go)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3856,
+        2368
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://evogo.athenesistemas.com.br/instance/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "6a4507ca-ef5e-42da-b5fa-2d96aeaffc1e",
+      "name": "Get Instances Go",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        4080,
+        2304
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dbData = $('Loop Instâncias (Go)').item.json;\nconst targetName = dbData.instance_name;\nconst response = $json;\n\nlet list = response;\nif (!Array.isArray(list)) {\n  list = response.data || response.instances || response.result || Object.values(response)[0];\n}\n\nif (!Array.isArray(list)) {\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, numero_instancia: '', current_status_api: 'formato_inesperado' } };\n}\n\nconst found = list.find(inst => {\n  const name = inst.name || inst.instanceName || inst.instance || inst.Instance || inst.nome;\n  return name === targetName;\n});\n\nif (!found) {\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, numero_instancia: '', current_status_api: 'nao_encontrada' } };\n}\n\nconst instanceId = found.id || found.instanceId || found.Id || found.ID || found.uuid || null;\nconst connected = found.connected === true || found.connected === 'true' ||\n  String(found.state || found.status || '').toLowerCase() === 'open';\n\n// Número da própria instância, extraído do JID (ex.: \"556292573164:62@s.whatsapp.net\" -> \"556292573164\")\nconst rawJid = found.jid || found.Jid || found.JID || '';\nconst numero_instancia = String(rawJid).split(/[:@]/)[0].replace(/\\D/g, '');\n\nreturn {\n  json: {\n    ...dbData,\n    found: true,\n    connected,\n    instanceId,\n    numero_instancia,\n    current_status_api: connected ? 'connected' : 'disconnected'\n  }\n};"
+      },
+      "id": "ade26ff4-37bf-40ae-9908-b507350070ff",
+      "name": "Resolver Status Go",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4304,
+        2304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "not-found-cond",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3185dbf1-3a43-42b1-bf3c-cf24b47f22ea",
+      "name": "Instância Não Encontrada? (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        2304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE evolution_instance_monitor SET enabled = false WHERE instance_name = $1",
+        "options": {
+          "queryReplacement": "={{ [ $('Loop Instâncias (Go)').item.json.instance_name ] }}"
+        }
+      },
+      "id": "9b0ec01a-a7d1-4742-874f-3f04ce6a444d",
+      "name": "Desativar Monitoramento (Go)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        8784,
+        1840
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "stuck-cond",
+              "leftValue": "={{ $json.connected }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a249699d-7e22-4b83-936f-3b1db9777ceb",
+      "name": "Está Travada? (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4752,
+        2400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "258b5ea7-072e-42db-bb5c-f860ba52a7a5",
+      "name": "Aguardar 5 segundos (Go)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4976,
+        2016
+      ],
+      "webhookId": "wh-t9-go"
+    },
+    {
+      "parameters": {
+        "jsCode": "// [Athene] Monta o payload para o SUBFLUXO reutilizável de proxy\n// (proxy-setter-v2-e-go), na variante Evo Go.\n// Lê a instância da iteração atual do loop via paired-item.\nconst r = $('Resolver Status Go').item.json;\nreturn { json: {\n  instance: r.instance_name,\n  instance_id: r.instanceId,\n  apikey: 'porv@2024Pc2Info',\n  evo_tipo: 'go',\n  evo_base_url: 'https://evogo.athenesistemas.com.br',\n  limite_envios: 50\n} };"
+      },
+      "name": "Preparar Proxy (Go)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        2016
+      ],
+      "id": "4d2ec3e3-3d42-4104-b1f9-3ea71dae6628"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_COM_ID_DO_SUBFLUXO",
+          "mode": "list",
+          "cachedResultName": "proxy-setter-v2-e-go"
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "name": "Aplicar Proxy (Sub)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [
+        5424,
+        2016
+      ],
+      "id": "74c0c8df-a91f-4404-83fe-d2ed4f20bff2",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://evogo.athenesistemas.com.br/instance/forcereconnect/{{ $('Resolver Status Go').item.json.instanceId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            },
+            {
+              "name": "instance",
+              "value": "={{ $('Resolver Status Go').item.json.instance_name }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $('Resolver Status Go').item.json.numero_instancia || '' }) }}",
+        "options": {}
+      },
+      "id": "b4ff0775-b73c-4049-8927-a1994e8fb09c",
+      "name": "Forçar Reconexão (Go)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        5648,
+        2016
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "987eb4c5-db24-4915-820d-c64605278cca",
+      "name": "Aguardar 60s (Go)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        5872,
+        2016
+      ],
+      "webhookId": "wh-t11-go"
+    },
+    {
+      "parameters": {
+        "url": "=https://evogo.athenesistemas.com.br/instance/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ed553b7f-2479-4d45-9576-41dfce90c1d4",
+      "name": "Get Instances Go (Recheck)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        6096,
+        2016
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruza a linha do banco (Loop Instâncias (Go)) com a lista de /instance/all\n// (Evo Go não tem endpoint de connectionState por instância documentado no swagger\n// com schema estável, então usamos o campo booleano \"connected\" que /instance/all\n// já expõe - o mesmo campo que \"Resolver Instance ID\" usa em send-message-go/worker-fila-go)\nconst dbData = $('Loop Instâncias (Go)').item.json;\nconst targetName = dbData.instance_name;\nconst response = $json;\n\nlet list = response;\nif (!Array.isArray(list)) {\n  list = response.data || response.instances || response.result || Object.values(response)[0];\n}\n\nif (!Array.isArray(list)) {\n  // Resposta fora do formato esperado - não derruba o monitor, só marca como \"não encontrada\"\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, current_status_api: 'formato_inesperado' } };\n}\n\nconst found = list.find(inst => {\n  const name = inst.name || inst.instanceName || inst.instance || inst.Instance || inst.nome;\n  return name === targetName;\n});\n\nif (!found) {\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, current_status_api: 'nao_encontrada' } };\n}\n\nconst instanceId = found.id || found.instanceId || found.Id || found.ID || found.uuid || null;\nconst connected = found.connected === true || found.connected === 'true' ||\n  String(found.state || found.status || '').toLowerCase() === 'open';\n\nreturn {\n  json: {\n    ...dbData,\n    found: true,\n    connected,\n    instanceId,\n    current_status_api: connected ? 'connected' : 'disconnected'\n  }\n};"
+      },
+      "id": "6a8623b8-4e79-4355-8581-67d467d38a0e",
+      "name": "Resolver Status Go (Recheck)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6320,
+        2016
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mesma lógica de decisão do fluxo original (Evolution API), adaptada:\n// currentStatus/isOnline agora vêm do \"connected\" já resolvido por Resolver Status Go\n// (não existe mais parsing de instance.state/status cru da Evolution antiga).\nconst dbData = $json;\n\nconst HORA_INICIO = 8;\nconst HORA_FIM = 18;\nconst INTERVALO_MINUTOS = 120; // 2 Horas\nconst MAX_TENTATIVAS_AUTO_FIX = 3;\n\nconst currentStatus = dbData.current_status_api || 'unknown';\nconst isOnline = dbData.connected === true;\n\nconst now = new Date();\nconst lastNotifString = dbData.last_notification_at;\nlet tentativas = parseInt(dbData.auto_fix_attempts || 0);\n\nlet minutosDesdeUltima = 999999;\nif (lastNotifString) {\n    const lastDate = new Date(lastNotifString);\n    if (!isNaN(lastDate.getTime())) {\n        const diffMs = now.getTime() - lastDate.getTime();\n        minutosDesdeUltima = Math.floor(diffMs / 1000 / 60);\n    }\n}\n\nlet shouldNotify = false;\nlet statusMessage = \"DESCONHECIDO\";\nlet motivoBloqueio = \"\";\n\nif (isOnline) {\n    shouldNotify = false;\n    statusMessage = \"CONECTADO\";\n    tentativas = 0;\n    motivoBloqueio = \"Está online\";\n} else {\n    statusMessage = (currentStatus === 'nao_encontrada') ? \"NAO ENCONTRADA NA API\" : \"DESCONECTADO\";\n    tentativas++;\n\n    if (minutosDesdeUltima >= INTERVALO_MINUTOS || tentativas >= MAX_TENTATIVAS_AUTO_FIX) {\n        shouldNotify = true;\n        motivoBloqueio = tentativas >= MAX_TENTATIVAS_AUTO_FIX ? \"Excedeu tentativas de auto-fix\" : \"Intervalo de tempo atingido\";\n    } else {\n        shouldNotify = false;\n        motivoBloqueio = `Auto-fix em andamento (Tentativa ${tentativas})`;\n    }\n}\n\nreturn {\n  json: {\n    ...dbData,\n    current_status_api: currentStatus,\n    status_msg_pt: statusMessage,\n    auto_fix_attempts: tentativas,\n    now_iso: now.toISOString(),\n    shouldNotify: shouldNotify,\n    debug_motivo: motivoBloqueio\n  }\n};"
+      },
+      "id": "4ad810d4-f760-45d2-8a1f-b65ded550757",
+      "name": "Avaliar Lógica (Go)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6544,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE evolution_instance_monitor\nSET\n  last_status = $1,\n  auto_fix_attempts = $5,\n  updated_at = $2,\n  last_status_change_at = CASE\n    WHEN last_status IS DISTINCT FROM $1 THEN $2\n    ELSE last_status_change_at\n  END,\n  last_notification_at = CASE\n    WHEN $3::boolean IS TRUE THEN $2\n    ELSE last_notification_at\n  END,\n  last_notification_status = CASE\n    WHEN $3::boolean IS TRUE THEN $1\n    ELSE last_notification_status\n  END\nWHERE id = $4\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ [ $json.current_status_api, $json.now_iso, $json.shouldNotify, $json.id, ($json.auto_fix_attempts || 0) ] }}"
+        }
+      },
+      "id": "d8c3f71c-ef95-4bea-918a-9e0efe0423f3",
+      "name": "Atualizar DB (Go)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        6768,
+        2400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "eeN7LjT9KqDuZNt6",
+          "name": "Postgres-OutBox"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "notify-cond",
+              "leftValue": "={{ $('Avaliar Lógica (Go)').item.json.shouldNotify }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "764fb9e5-c110-470f-b836-f27c263274a4",
+      "name": "Precisa Notificar? (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6992,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "9c93cf7c-ef2d-4117-8567-81eeb0f1bb70",
+      "name": "Aguardar 30 (Go)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        7216,
+        2320
+      ],
+      "webhookId": "wh-t17-go"
+    },
+    {
+      "parameters": {
+        "url": "=https://evogo.athenesistemas.com.br/instance/all",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0310ef21-b68b-4eed-88e9-33ed481bf8bc",
+      "name": "Get Instances Go (Final)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        7440,
+        2320
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Cruza a linha do banco (Loop Instâncias (Go)) com a lista de /instance/all\n// (Evo Go não tem endpoint de connectionState por instância documentado no swagger\n// com schema estável, então usamos o campo booleano \"connected\" que /instance/all\n// já expõe - o mesmo campo que \"Resolver Instance ID\" usa em send-message-go/worker-fila-go)\nconst dbData = $('Loop Instâncias (Go)').item.json;\nconst targetName = dbData.instance_name;\nconst response = $json;\n\nlet list = response;\nif (!Array.isArray(list)) {\n  list = response.data || response.instances || response.result || Object.values(response)[0];\n}\n\nif (!Array.isArray(list)) {\n  // Resposta fora do formato esperado - não derruba o monitor, só marca como \"não encontrada\"\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, current_status_api: 'formato_inesperado' } };\n}\n\nconst found = list.find(inst => {\n  const name = inst.name || inst.instanceName || inst.instance || inst.Instance || inst.nome;\n  return name === targetName;\n});\n\nif (!found) {\n  return { json: { ...dbData, found: false, connected: false, instanceId: null, current_status_api: 'nao_encontrada' } };\n}\n\nconst instanceId = found.id || found.instanceId || found.Id || found.ID || found.uuid || null;\nconst connected = found.connected === true || found.connected === 'true' ||\n  String(found.state || found.status || '').toLowerCase() === 'open';\n\nreturn {\n  json: {\n    ...dbData,\n    found: true,\n    connected,\n    instanceId,\n    current_status_api: connected ? 'connected' : 'disconnected'\n  }\n};"
+      },
+      "id": "7ee69810-6d3e-4be0-9ea6-0ac16416c14d",
+      "name": "Resolver Status Go (Final)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7664,
+        2320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "stuck-final-cond",
+              "leftValue": "={{ $json.connected }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5f83779f-f038-4e5a-a6d8-92f852604be6",
+      "name": "Está Travada?1 (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7888,
+        2320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// FIX: a versão original deste node (\"Montar Msg\") montava o texto mas nunca dava \"return\",\n// então \"Tem WhatsApp?\"/\"Tem E-mail?\"/\"Enviar WhatsApp\"/\"Enviar Email\" ficavam sem dado (bug\n// pré-existente no fluxo antigo). Aqui devolvemos o json com notify_text/notify_whatsapp_number/\n// notify_email explicitamente, propagando os campos que já vêm de evolution_instance_monitor (c.*).\nconst s = $('Avaliar Lógica (Go)').item.json;\nconst tentativas = s.auto_fix_attempts || 0;\nconst statusMsg = (s.status_msg_pt || 'DESCONHECIDO').toString().trim();\nconst instance = s.instance_name;\n\nconst texto =\n  `⚠️ 🚨 *Alerta de Instância (Evo Go)* 🚨\\n` +\n  `A instância *${instance}* está com status: *${statusMsg}*.\\n \\n` +\n  `🛠️ *Ações realizadas:* Fizemos ${tentativas} tentativa(s) de recuperação automática (Force Reconnect).\\n` +\n  `❌ *Resultado:* Sem sucesso até o momento.\\n \\n` +\n  `👉 *Ação necessária:* Verifique o dispositivo ou reconecte pelo painel.`;\n\nreturn {\n  json: {\n    ...s,\n    notify_text: texto,\n    notify_whatsapp_number: s.notify_number_final,\n    notify_email: s.notify_email\n  }\n};"
+      },
+      "id": "fe72c1c9-a340-4f04-b663-9968f369d919",
+      "name": "Montar Msg (Go)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8112,
+        2256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.notify_whatsapp_number }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3cf86205-460e-43d4-89d8-38d3d5a70360",
+      "name": "Tem WhatsApp? (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        8336,
+        2112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.notify_email }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8ff0ee17-325b-4015-8c95-0e08790fd302",
+      "name": "Tem E-mail? (Go)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        8336,
+        2400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.athenesistemas.com.br/webhook/whatsapp/outbox",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "porv@2024Pc2Info"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $json.notify_whatsapp_number }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.notify_text }}"
+            },
+            {
+              "name": "instance",
+              "value": "Pc2Info"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "17c9a40c-198b-4303-8357-b40d3030e1f2",
+      "name": "Enviar WhatsApp (Go)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        8560,
+        2032
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "athenesistema@gmail.com",
+        "toEmail": "={{ $json.notify_email }}",
+        "subject": "Alerta: WhatsApp Desconectado (Evo Go)",
+        "text": "={{ $json.notify_text }}",
+        "options": {}
+      },
+      "id": "da36b43a-f183-4c23-b338-0f7c7fbb7fec",
+      "name": "Enviar Email (Go)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [
+        8560,
+        2320
+      ],
+      "webhookId": "wh-t25-go",
+      "credentials": {
+        "smtp": {
+          "id": "RxzyLWXVtk62NgU7",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "d44b315b-74e9-4974-b51c-c7fcec155741",
+      "name": "Fim Loop (Go)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        8784,
+        2400
+      ]
+    }
+  ],
+  "connections": {
+    "A cada 10 min (Go)": {
+      "main": [
+        [
+          {
+            "node": "Carregar do Banco (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carregar do Banco (Go)": {
+      "main": [
+        [
+          {
+            "node": "Loop Instâncias (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Instâncias (Go)": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Get Instances Go",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instances Go": {
+      "main": [
+        [
+          {
+            "node": "Resolver Status Go",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Status Go": {
+      "main": [
+        [
+          {
+            "node": "Instância Não Encontrada? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instância Não Encontrada? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Desativar Monitoramento (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Está Travada? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Desativar Monitoramento (Go)": {
+      "main": [
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Está Travada? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 5 segundos (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Avaliar Lógica (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 5 segundos (Go)": {
+      "main": [
+        [
+          {
+            "node": "Preparar Proxy (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Proxy (Go)": {
+      "main": [
+        [
+          {
+            "node": "Aplicar Proxy (Sub)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar Proxy (Sub)": {
+      "main": [
+        [
+          {
+            "node": "Forçar Reconexão (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forçar Reconexão (Go)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 60s (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 60s (Go)": {
+      "main": [
+        [
+          {
+            "node": "Get Instances Go (Recheck)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instances Go (Recheck)": {
+      "main": [
+        [
+          {
+            "node": "Resolver Status Go (Recheck)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Status Go (Recheck)": {
+      "main": [
+        [
+          {
+            "node": "Avaliar Lógica (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Avaliar Lógica (Go)": {
+      "main": [
+        [
+          {
+            "node": "Atualizar DB (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar DB (Go)": {
+      "main": [
+        [
+          {
+            "node": "Precisa Notificar? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Precisa Notificar? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 30 (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 30 (Go)": {
+      "main": [
+        [
+          {
+            "node": "Get Instances Go (Final)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Instances Go (Final)": {
+      "main": [
+        [
+          {
+            "node": "Resolver Status Go (Final)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Status Go (Final)": {
+      "main": [
+        [
+          {
+            "node": "Está Travada?1 (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Está Travada?1 (Go)": {
+      "main": [
+        [
+          {
+            "node": "Montar Msg (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Msg (Go)": {
+      "main": [
+        [
+          {
+            "node": "Tem WhatsApp? (Go)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Tem E-mail? (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem WhatsApp? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem E-mail? (Go)": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp (Go)": {
+      "main": [
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Email (Go)": {
+      "main": [
+        [
+          {
+            "node": "Fim Loop (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fim Loop (Go)": {
+      "main": [
+        [
+          {
+            "node": "Loop Instâncias (Go)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "54bbffc7902ab8f8ceb3a5a6c8285e88c6f039c13bb180d34bb3ef65c95dc3f4"
+  }
+}

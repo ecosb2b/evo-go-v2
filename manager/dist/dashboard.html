@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Evolution GO — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#141414; --panel2:#1b1b1b; --border:#262626;
+    --text:#e5e5e5; --muted:#8a8a8a; --accent:#10b981; --accent-dim:#0f3d2e;
+    --red:#ef4444; --amber:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:14px}
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--border);background:#0d0d0d;position:sticky;top:0;z-index:10}
+  header .logo{color:var(--accent);font-weight:700;font-size:16px;letter-spacing:.2px}
+  header .spacer{flex:1}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:var(--panel);font-size:12px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+  .dot.on{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .dot.off{background:var(--red);box-shadow:0 0 8px var(--red)}
+  select,input,button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:7px 10px}
+  button{cursor:pointer}
+  button.primary{background:var(--accent-dim);border-color:var(--accent);color:#d1fae5}
+  button:hover{border-color:var(--accent)}
+  main{padding:22px;max-width:1400px;margin:0 auto}
+  .grid{display:grid;gap:16px}
+  .kpis{grid-template-columns:repeat(4,1fr)}
+  .charts{grid-template-columns:1fr 1fr;margin-top:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .card h3{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+  .kpi .value{font-size:34px;font-weight:700;line-height:1.1;margin-top:6px}
+  .kpi .sub{color:var(--muted);font-size:12px;margin-top:4px}
+  .kpi.green .value{color:var(--accent)} .kpi.red .value{color:var(--red)}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border);font-size:13px}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  tbody tr{cursor:pointer} tbody tr:hover{background:var(--panel2)}
+  tbody tr.sel{background:var(--accent-dim)}
+  .status-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted)}
+  #logs{max-height:320px;overflow:auto;background:#0d0d0d;border:1px solid var(--border);border-radius:8px;padding:10px;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;color:#cfcfcf}
+  .muted{color:var(--muted)}
+  .gate{max-width:440px;margin:80px auto;text-align:center}
+  .gate .card{text-align:left}
+  .gate label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+  .gate input{width:100%}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .err{color:var(--red);font-size:12px;margin-top:8px;min-height:16px}
+  a.link{color:var(--accent);cursor:pointer}
+  .chart-box{position:relative;height:260px}
+  /* modo embed: quando exibido dentro da aba Dashboard do manager (iframe) */
+  body.embed{background:transparent}
+  body.embed header{position:static;padding:8px 14px;background:transparent;border-bottom:1px solid var(--border)}
+  body.embed header .logo,body.embed header>.muted{display:none}
+  body.embed main{max-width:none;margin:0;padding:14px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const LS_KEY="egogo_dash_key", LS_BASE="egogo_dash_base";
+const $=(s,el=document)=>el.querySelector(s);
+const state={base:localStorage.getItem(LS_BASE)||"",key:localStorage.getItem(LS_KEY)||"",instances:[],selected:null,timer:null,interval:15,charts:{}};
+
+function api(path){
+  return fetch((state.base||"")+path,{headers:{apikey:state.key}}).then(async r=>{
+    if(r.status===401) throw new Error("401 — Global API Key inválida");
+    if(!r.ok) throw new Error(r.status+" — "+path);
+    return r.json();
+  });
+}
+function esc(s){return (s==null?"":String(s)).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function fmtDate(s){if(!s)return"—";const d=new Date(s);return isNaN(d)?s:d.toLocaleString("pt-BR");}
+
+function renderGate(msg){
+  document.getElementById("app").innerHTML=`
+  <div class="gate">
+    <h2 style="color:var(--accent)">Evolution GO — Dashboard</h2>
+    <div class="card">
+      <label>Global API Key</label>
+      <input id="g-key" type="password" placeholder="sua GLOBAL_API_KEY" value="${esc(state.key)}"/>
+      <label>Base URL da API <span class="muted">(deixe vazio se abrir em /dashboard no mesmo servidor)</span></label>
+      <input id="g-base" placeholder="https://sua-api.com  (opcional)" value="${esc(state.base)}"/>
+      <div class="err">${esc(msg||"")}</div>
+      <div class="row" style="margin-top:14px"><button class="primary" id="g-go">Entrar</button></div>
+    </div>
+  </div>`;
+  $("#g-go").onclick=()=>{
+    state.key=$("#g-key").value.trim(); state.base=$("#g-base").value.trim().replace(/\/$/,"");
+    if(!state.key){renderGate("Informe a Global API Key.");return;}
+    localStorage.setItem(LS_KEY,state.key); localStorage.setItem(LS_BASE,state.base);
+    boot();
+  };
+}
+
+function shell(){
+  document.getElementById("app").innerHTML=`
+  <header>
+    <span class="logo">Evolution GO</span>
+    <span class="muted">Dashboard</span>
+    <span class="spacer"></span>
+    <span class="badge"><span id="srv-dot" class="dot"></span><span id="srv-txt">servidor…</span></span>
+    <span class="badge">atualizado: <span id="upd">—</span></span>
+    <select id="int">
+      <option value="0">manual</option><option value="10">10s</option>
+      <option value="15" selected>15s</option><option value="30">30s</option><option value="60">60s</option>
+    </select>
+    <button id="refresh">Atualizar</button>
+    <button id="logout" title="Trocar chave">Sair</button>
+  </header>
+  <main>
+    <div class="grid kpis">
+      <div class="card kpi"><h3>Instâncias</h3><div class="value" id="k-total">—</div><div class="sub">total cadastradas</div></div>
+      <div class="card kpi green"><h3>Conectadas</h3><div class="value" id="k-on">—</div><div class="sub">online agora</div></div>
+      <div class="card kpi red"><h3>Desconectadas</h3><div class="value" id="k-off">—</div><div class="sub">offline</div></div>
+      <div class="card kpi"><h3>Disponibilidade</h3><div class="value" id="k-pct">—</div><div class="sub">conectadas / total</div></div>
+    </div>
+    <div class="grid charts">
+      <div class="card"><h3>Status de conexão</h3><div class="chart-box"><canvas id="c-donut"></canvas></div></div>
+      <div class="card"><h3>Mensagens por dia <span class="muted" id="msg-total" style="text-transform:none;letter-spacing:0"></span></h3><div class="chart-box"><canvas id="c-bar"></canvas></div></div>
+    </div>
+    <div class="grid" style="grid-template-columns:repeat(5,1fr);margin-top:16px">
+      <div class="card kpi"><h3>Mensagens</h3><div class="value" id="s-msg">—</div><div class="sub">total salvas</div></div>
+      <div class="card kpi"><h3>RAM do host</h3><div class="value" id="s-ram">—</div><div class="sub" id="s-ram-sub">usada / total</div></div>
+      <div class="card kpi"><h3>Load 1m</h3><div class="value" id="s-load">—</div><div class="sub" id="s-load-sub">CPUs: —</div></div>
+      <div class="card kpi"><h3>Goroutines</h3><div class="value" id="s-gor">—</div><div class="sub" id="s-heap">heap —</div></div>
+      <div class="card kpi"><h3>Uptime</h3><div class="value" id="s-up">—</div><div class="sub" id="s-gover">—</div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Conversas mais ativas</h3>
+      <div id="top-src" class="muted">—</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Instâncias</h3>
+      <div class="err" id="tbl-err"></div>
+      <table><thead><tr><th>Status</th><th>Nome</th><th>Número / JID</th><th>SO</th><th>Cliente</th><th>Criada</th><th>Motivo desconexão</th></tr></thead>
+      <tbody id="tbody"></tbody></table>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 style="display:flex;align-items:center;gap:8px">Logs recentes <span class="muted" id="log-inst"></span>
+        <span style="flex:1"></span>
+        <button id="log-close" style="display:none;padding:3px 10px" title="Fechar logs">✕ fechar</button>
+      </h3>
+      <div class="muted" id="log-hint">Clique numa instância acima para ver os logs.</div>
+      <div id="logs" style="display:none"></div>
+    </div>
+  </main>`;
+  $("#refresh").onclick=load;
+  $("#logout").onclick=()=>{localStorage.removeItem(LS_KEY);renderGate("");};
+  $("#int").onchange=e=>{state.interval=+e.target.value;schedule();};
+  $("#log-close").onclick=closeLogs;
+  pollServer();
+}
+
+function schedule(){ if(state.timer)clearInterval(state.timer); if(state.interval>0)state.timer=setInterval(load,state.interval*1000); }
+
+function pollServer(){
+  api("/server/ok").then(()=>{$("#srv-dot").className="dot on";$("#srv-txt").textContent="servidor online";})
+    .catch(()=>{$("#srv-dot").className="dot off";$("#srv-txt").textContent="servidor offline";});
+}
+
+function jidNumber(inst){
+  const j=inst.jid||""; const n=j.split(/[:@]/)[0]; return n?("+"+n.replace(/^\+/,"")):"—";
+}
+
+function drawCharts(list){
+  const on=list.filter(i=>i.connected).length, off=list.length-on;
+  const dctx=$("#c-donut");
+  if(state.charts.donut)state.charts.donut.destroy();
+  state.charts.donut=new Chart(dctx,{type:"doughnut",
+    data:{labels:["Conectadas","Desconectadas"],datasets:[{data:[on,off],backgroundColor:["#10b981","#ef4444"],borderColor:"#141414",borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"#c7c7c7"}}},cutout:"62%"}});
+}
+
+function fmtMB(mb){ if(mb==null||isNaN(mb))return"—"; return mb>=1024?(mb/1024).toFixed(1)+" GB":Math.round(mb)+" MB"; }
+function fmtUptime(s){ s=Math.floor(s||0); const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); if(d)return d+"d "+h+"h"; if(h)return h+"h "+m+"m"; return m+"m"; }
+
+function loadStats(){ api("/server/stats").then(renderStats).catch(()=>{}); }
+
+function renderStats(d){
+  d=d||{}; const sys=d.system||{}, msg=d.messages||{};
+  const total=(msg.total!=null?msg.total:null);
+  $("#s-msg").textContent = total!=null?total:"—";
+  $("#msg-total").textContent = total!=null?("(total: "+total+")"):"";
+  if(sys.hostMemUsedPct!=null){
+    $("#s-ram").textContent=Math.round(sys.hostMemUsedPct)+"%";
+    $("#s-ram-sub").textContent=fmtMB(sys.hostMemTotalMB-sys.hostMemAvailableMB)+" / "+fmtMB(sys.hostMemTotalMB);
+  }else{$("#s-ram").textContent="—";$("#s-ram-sub").textContent="host indisponível";}
+  $("#s-load").textContent = sys.loadAvg1!=null?sys.loadAvg1.toFixed(2):"—";
+  $("#s-load-sub").textContent = "CPUs: "+(sys.numCpu!=null?sys.numCpu:"—");
+  $("#s-gor").textContent = sys.goroutines!=null?sys.goroutines:"—";
+  $("#s-heap").textContent = "heap "+(sys.heapInuseMB!=null?Math.round(sys.heapInuseMB)+" MB":"—");
+  $("#s-up").textContent = sys.uptimeSeconds!=null?fmtUptime(sys.uptimeSeconds):"—";
+  $("#s-gover").textContent = sys.goVersion||"";
+  renderMsgBar(msg.byDay||[]);
+  renderTopSources(msg.topSources||[]);
+}
+
+function renderMsgBar(byDay){
+  const arr=byDay.slice().reverse(); // vem desc -> cronologico
+  const labels=arr.map(x=>String(x.key).slice(5)), vals=arr.map(x=>x.count);
+  const ctx=$("#c-bar");
+  if(state.charts.bar)state.charts.bar.destroy();
+  state.charts.bar=new Chart(ctx,{type:"bar",
+    data:{labels:labels,datasets:[{label:"mensagens",data:vals,backgroundColor:"#10b981"}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#8a8a8a"},grid:{color:"#222"}},y:{beginAtZero:true,ticks:{color:"#8a8a8a",precision:0},grid:{color:"#222"}}}}});
+}
+
+function renderTopSources(list){
+  const box=$("#top-src");
+  if(!list||!list.length){box.innerHTML='<span class="muted">Sem dados (ative DATABASE_SAVE_MESSAGES pra registrar mensagens).</span>';return;}
+  const max=Math.max.apply(null,list.map(x=>x.count))||1;
+  box.innerHTML=list.map(x=>{
+    const pct=Math.round(x.count/max*100);
+    const num=x.key?("+"+String(x.key).replace(/^\+/,"")):"—";
+    return '<div style="display:flex;align-items:center;gap:10px;margin:7px 0">'
+      +'<span class="mono" style="width:160px;color:#cfcfcf">'+esc(num)+'</span>'
+      +'<span style="flex:1;background:#0d0d0d;border-radius:6px;overflow:hidden;height:14px"><span style="display:block;height:100%;width:'+pct+'%;background:var(--accent)"></span></span>'
+      +'<span class="mono" style="width:56px;text-align:right">'+x.count+'</span></div>';
+  }).join("");
+}
+
+function renderTable(list){
+  const tb=$("#tbody"); tb.innerHTML="";
+  if(!list.length){tb.innerHTML=`<tr><td colspan="7" class="muted">Nenhuma instância.</td></tr>`;return;}
+  list.forEach(i=>{
+    const tr=document.createElement("tr");
+    if(state.selected===i.id)tr.className="sel";
+    const dot=i.connected?'<span class="dot on"></span>':'<span class="dot off"></span>';
+    const txt=i.connected?"conectada":"desconectada";
+    tr.innerHTML=`<td><span class="status-pill">${dot}${txt}</span></td>
+      <td>${esc(i.name)}</td><td class="mono">${esc(jidNumber(i))}</td>
+      <td>${esc(i.os_name||"—")}</td><td>${esc(i.client_name||"—")}</td>
+      <td class="mono">${esc(fmtDate(i.createdAt))}</td><td class="muted">${esc(i.disconnect_reason||"—")}</td>`;
+    tr.onclick=()=>{state.selected=i.id;renderTable(list);loadLogs(i);};
+    tb.appendChild(tr);
+  });
+}
+
+function closeLogs(){
+  state.selected=null;
+  $("#logs").style.display="none";
+  $("#log-inst").textContent="";
+  $("#log-close").style.display="none";
+  $("#log-hint").style.display="block";
+  renderTable(state.instances);
+}
+
+function loadLogs(inst){
+  $("#log-inst").textContent="— "+(inst.name||inst.id);
+  $("#log-hint").style.display="none";
+  $("#log-close").style.display="inline-block";
+  const box=$("#logs"); box.style.display="block"; box.textContent="carregando…";
+  api("/instance/logs/"+inst.id).then(res=>{
+    let logs=res&&res.data?res.data:res;
+    if(Array.isArray(logs)){
+      box.textContent=logs.map(l=>typeof l==="string"?l:JSON.stringify(l)).join("\n")||"(sem logs)";
+    }else if(typeof logs==="string"){box.textContent=logs;}
+    else{box.textContent=JSON.stringify(logs,null,2);}
+  }).catch(e=>{box.textContent="erro ao carregar logs: "+e.message;});
+}
+
+function load(){
+  pollServer();
+  loadStats();
+  api("/instance/all").then(res=>{
+    $("#tbl-err").textContent="";
+    const list=(res&&res.data)?res.data:(Array.isArray(res)?res:[]);
+    state.instances=list;
+    const on=list.filter(i=>i.connected).length;
+    $("#k-total").textContent=list.length;
+    $("#k-on").textContent=on;
+    $("#k-off").textContent=list.length-on;
+    $("#k-pct").textContent=list.length?Math.round(on/list.length*100)+"%":"—";
+    $("#upd").textContent=new Date().toLocaleTimeString("pt-BR");
+    drawCharts(list); renderTable(list);
+  }).catch(e=>{
+    if(String(e.message).startsWith("401")){renderGate(e.message);return;}
+    $("#tbl-err").textContent=e.message;
+  });
+}
+
+function boot(){ shell(); load(); schedule(); }
+if(new URLSearchParams(location.search).get("embed")) document.body.classList.add("embed");
+if(state.key) boot(); else renderGate("");
+</script>
+</body>
+</html>

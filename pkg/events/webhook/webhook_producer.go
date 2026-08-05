@@ -2,6 +2,7 @@ package webhook_producer
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -43,11 +44,53 @@ func (p *webhookProducer) Produce(
 	if p.url != "" {
 		go p.sendWebhookWithRetry(p.url, payload, 5, 30*time.Second, userID)
 	}
-	if webhookUrl != "" {
-		go p.sendWebhookWithRetry(webhookUrl, payload, 5, 30*time.Second, userID)
+
+	// [Athene] Suporte a múltiplos webhooks por instância. O campo Webhook da
+	// instância pode conter várias URLs (separadas por quebra de linha, vírgula
+	// ou ponto-e-vírgula, ou um array JSON). A MESMA requisição é enviada para
+	// cada endereço. 100% retrocompatível com uma única URL.
+	for _, url := range splitWebhookURLs(webhookUrl) {
+		u := url
+		go p.sendWebhookWithRetry(u, payload, 5, 30*time.Second, userID)
 	}
 
 	return nil
+}
+
+// splitWebhookURLs quebra a string de webhook da instância em uma ou mais URLs.
+// Aceita um array JSON (["https://a","https://b"]) OU uma lista separada por
+// quebra de linha / vírgula / ponto-e-vírgula. Remove duplicatas, entradas
+// vazias e o marcador "disabled".
+func splitWebhookURLs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "disabled" {
+		return nil
+	}
+
+	var parts []string
+	if strings.HasPrefix(raw, "[") {
+		var arr []string
+		if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+			parts = arr
+		}
+	}
+	if parts == nil {
+		parts = strings.FieldsFunc(raw, func(r rune) bool {
+			return r == '\n' || r == '\r' || r == ',' || r == ';'
+		})
+	}
+
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" || p == "disabled" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
 }
 
 func (p *webhookProducer) sendWebhookWithRetry(url string, body []byte, maxRetries int, retryInterval time.Duration, userID string) {
