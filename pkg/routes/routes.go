@@ -159,17 +159,11 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/profileStatus", r.userHandler.SetProfileStatus)
 		}
 	}
-	// [Athene] Catálogo de produtos (WhatsApp Business). Auth por token da instância.
-	routes = eng.Group("/catalog")
-	{
-		routes.Use(r.authMiddleware.Auth)
-		{
-			routes.GET("/products", r.userHandler.GetCatalog)
-			routes.POST("/product", r.userHandler.CreateProduct)
-			routes.PUT("/product", r.userHandler.UpdateProduct)
-			routes.DELETE("/product", r.userHandler.DeleteProducts)
-		}
-	}
+	// O grupo /catalog foi removido: os IQs w:biz:catalog deixaram de responder
+	// (a Meta migrou o catálogo para a API MEX/GraphQL), então os endpoints só
+	// entregavam timeout de 75s prendendo a requisição. O envio de card de
+	// produto (POST /send/product) não depende disso e continua funcionando,
+	// porque trafega como mensagem e não como IQ de negócio.
 	routes = eng.Group("/message")
 	{
 		routes.Use(r.authMiddleware.Auth)

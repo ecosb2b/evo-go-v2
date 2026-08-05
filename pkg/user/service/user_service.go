@@ -34,10 +34,6 @@ type UserService interface {
 	GetAvatar(ctx context.Context, data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error)
 	GetContacts(instance *instance_model.Instance) ([]ContactInfo, error)
 	SaveContact(data *SaveContactStruct, instance *instance_model.Instance) error
-	CreateProduct(data *ProductCreateStruct, instance *instance_model.Instance) (map[string]any, error)
-	UpdateProduct(data *ProductUpdateStruct, instance *instance_model.Instance) (map[string]any, error)
-	GetCatalog(instance *instance_model.Instance) ([]map[string]any, error)
-	DeleteProducts(data *ProductDeleteStruct, instance *instance_model.Instance) (int, error)
 	GetPrivacy(instance *instance_model.Instance) (types.PrivacySettings, error)
 	SetPrivacy(data *PrivacyStruct, instance *instance_model.Instance) (*types.PrivacySettings, error)
 	BlockContact(data *BlockStruct, instance *instance_model.Instance) (*types.Blocklist, error)
