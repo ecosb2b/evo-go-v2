@@ -13,3 +13,8 @@ server
 # Utilitarios temporarios (Athene)
 savecontact.patch
 regen-swagger.sh
+
+# Claude Code: a configuracao e local de cada maquina, mas as skills descrevem
+# processos do projeto e ficam versionadas (.claude/skills/).
+.claude/settings.json
+.claude/settings.local.json
