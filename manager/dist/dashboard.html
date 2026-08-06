@@ -54,6 +54,10 @@
   body.embed{background:transparent}
   body.embed header{position:static;padding:8px 14px;background:transparent;border-bottom:1px solid var(--border)}
   body.embed header .logo,body.embed header>.muted{display:none}
+  /* Dentro do manager o Sair daqui duplicaria o do cabecalho do manager, e so
+     limparia a chave deste painel — deixando o usuario deslogado de um lado e
+     nao do outro. A sessao passa a ser responsabilidade unica do manager. */
+  body.embed header #logout{display:none}
   body.embed main{max-width:none;margin:0;padding:14px}
 </style>
 </head>
