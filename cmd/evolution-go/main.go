@@ -34,6 +34,7 @@ import (
 	rabbitmq_producer "github.com/evolution-foundation/evolution-go/pkg/events/rabbitmq"
 	webhook_producer "github.com/evolution-foundation/evolution-go/pkg/events/webhook"
 	websocket_producer "github.com/evolution-foundation/evolution-go/pkg/events/websocket"
+	"github.com/evolution-foundation/evolution-go/pkg/gate"
 	group_handler "github.com/evolution-foundation/evolution-go/pkg/group/handler"
 	group_service "github.com/evolution-foundation/evolution-go/pkg/group/service"
 	instance_handler "github.com/evolution-foundation/evolution-go/pkg/instance/handler"
@@ -60,6 +61,10 @@ import (
 	server_handler "github.com/evolution-foundation/evolution-go/pkg/server/handler"
 	storage_interfaces "github.com/evolution-foundation/evolution-go/pkg/storage/interfaces"
 	minio_storage "github.com/evolution-foundation/evolution-go/pkg/storage/minio"
+	typebot_handler "github.com/evolution-foundation/evolution-go/pkg/typebot/handler"
+	typebot_model "github.com/evolution-foundation/evolution-go/pkg/typebot/model"
+	typebot_repository "github.com/evolution-foundation/evolution-go/pkg/typebot/repository"
+	typebot_service "github.com/evolution-foundation/evolution-go/pkg/typebot/service"
 	user_handler "github.com/evolution-foundation/evolution-go/pkg/user/handler"
 	user_service "github.com/evolution-foundation/evolution-go/pkg/user/service"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
@@ -161,6 +166,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 	instanceRepository := instance_repository.NewInstanceRepository(db)
 	messageRepository := message_repository.NewMessageRepository(db)
 	labelRepository := label_repository.NewLabelRepository(db)
+	typebotRepository := typebot_repository.NewTypebotRepository(db)
 
 	whatsmeowService := whatsmeow_service.NewWhatsmeowService(
 		instanceRepository,
@@ -197,6 +203,11 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 	labelService := label_service.NewLabelService(clientPointer, whatsmeowService, labelRepository, loggerWrapper)
 	newsletterService := newsletter_service.NewNewsletterService(clientPointer, whatsmeowService, loggerWrapper)
 
+	// O Typebot responde pela própria instância, então consome o sendMessageService.
+	// É registrado no whatsmeowService para ser chamado quando uma mensagem chega.
+	typebotService := typebot_service.NewTypebotService(typebotRepository, sendMessageService, config, loggerWrapper)
+	whatsmeowService.SetTypebotService(typebotService)
+
 	// NOVO: PollHandler usando PollService já inicializado no whatsmeowService (evita dupla inicialização)
 	pollHandler := poll_handler.NewPollHandler(whatsmeowService.GetPollService(), loggerWrapper)
 
@@ -216,10 +227,18 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		c.Next()
 	})
 
-	r.Use(core.GateMiddleware(runtimeCtx))
+	// Gate próprio deste fork, no lugar do core.GateMiddleware. Ver pkg/gate:
+	// o padrão é liberar as rotas, e EVOLUTION_GATE_MODE=license devolve o
+	// comportamento do upstream. O pacote core não foi alterado.
+	r.Use(gate.Middleware(runtimeCtx))
 
-	// License routes (always accessible, even without license)
-	core.LicenseRoutes(r, runtimeCtx)
+	// core.LicenseRoutes não é registrado: seus handlers desreferenciam o
+	// RuntimeContext, que agora é nil, e /license/register e /license/activate
+	// existem apenas para conduzir a ativação contra o servidor de licenciamento.
+	// O /license/status que o manager consulta é respondido pelo gate.
+	if runtimeCtx != nil {
+		core.LicenseRoutes(r, runtimeCtx)
+	}
 
 	// Passkey ceremony routes — PUBLIC (called by the browser extension from the
 	// web.whatsapp.com origin, gated only by an opaque ephemeral token).
@@ -239,6 +258,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		newsletter_handler.NewNewsletterHandler(newsletterService),
 		pollHandler,
 		server_handler.NewServerHandler(messageRepository),
+		typebot_handler.NewTypebotHandler(typebotRepository, loggerWrapper),
 	).AssignRoutes(r)
 
 	if config.ConnectOnStartup {
@@ -262,7 +282,13 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 }
 
 func migrate(db *gorm.DB) {
-	err := db.AutoMigrate(&instance_model.Instance{}, &message_model.Message{}, &label_model.Label{})
+	err := db.AutoMigrate(
+		&instance_model.Instance{},
+		&message_model.Message{},
+		&label_model.Label{},
+		&typebot_model.Typebot{},
+		&typebot_model.TypebotSession{},
+	)
 
 	if err != nil {
 		log.Fatal(err)
@@ -369,13 +395,32 @@ func main() {
 
 	migrate(db)
 
-	// Initialize core DB + license runtime
+	// A tabela runtime_configs continua sendo migrada: se um dia este fork voltar
+	// a operar com licença (EVOLUTION_GATE_MODE=license), o core a encontra pronta.
 	core.SetDB(db)
 	if err := core.MigrateDB(); err != nil {
 		log.Fatal("Failed to migrate runtime_configs: ", err)
 	}
-	tier := "evolution-go"
-	runtimeCtx := core.InitializeRuntime(tier, version, cfg.GlobalApiKey)
+
+	// core.InitializeRuntime NÃO é chamado de propósito.
+	//
+	// Além de montar o contexto de licença, ele contata o servidor de
+	// licenciamento a cada boot: recebe a GLOBAL_API_KEY e chama POST /v1/activate
+	// (ver _c4m em pkg/core/c0.go), enviando instance_id e versão. Com o gate
+	// próprio deste fork, esse contato não decide mais nada — apenas reporta a
+	// inicialização para um terceiro.
+	//
+	// Passar nil adiante é seguro nos pontos que continuam ativos:
+	//   - gate.Middleware trata rc nil (ver pkg/gate)
+	//   - core.Shutdown retorna imediatamente com rc nil
+	// Já core.LicenseRoutes e core.StartHeartbeat desreferenciam rc, então
+	// deixaram de ser registrados — as rotas /license/register e /license/activate
+	// só serviam ao fluxo de ativação, e o heartbeat só roda quando ativado.
+	// O /license/status que o manager consulta é respondido pelo gate.
+	//
+	// Para voltar ao comportamento do upstream, restaure estas chamadas e use
+	// EVOLUTION_GATE_MODE=license. O pacote core segue intacto.
+	var runtimeCtx *core.RuntimeContext
 
 	var conn *amqp.Connection
 
@@ -411,7 +456,11 @@ func main() {
 	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
 	defer heartbeatCancel()
 
-	core.StartHeartbeat(heartbeatCtx, runtimeCtx, startTime)
+	// O heartbeat reporta uptime ao servidor de licenciamento e só roda quando há
+	// ativação — com runtimeCtx nil ele desreferenciaria nil, então não sobe.
+	if runtimeCtx != nil {
+		core.StartHeartbeat(heartbeatCtx, runtimeCtx, startTime)
+	}
 
 	srv := &http.Server{
 		Addr:    ":" + os.Getenv("SERVER_PORT"),

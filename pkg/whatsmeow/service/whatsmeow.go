@@ -54,6 +54,15 @@ type WhatsmeowService interface {
 	StartClient(clientData *ClientData)
 	ConnectOnStartup(clientName string)
 	StartInstance(instanceId string) error
+
+	// SetTypebotService liga o processador do Typebot. Ele é injetado em vez de
+	// importado porque typebot_service depende de sendMessage_service, que
+	// depende deste pacote — importar direto fecharia um ciclo.
+	// Chamado uma única vez no boot, antes de qualquer cliente subir.
+	SetTypebotService(processor TypebotProcessor)
+	// DispatchToTypebot repassa uma mensagem recebida ao Typebot, se houver um
+	// configurado. Não bloqueia: a chamada HTTP acontece em outra goroutine.
+	DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool)
 	ReconnectClient(instanceId string) error
 	ScheduleReconnect(instanceId string)
 	ClearInstanceCache(instanceId string, token string) error
@@ -77,9 +86,18 @@ type clientVersion struct {
 	Patch int
 }
 
+// TypebotProcessor é a fatia do serviço de Typebot que este pacote consome.
+// Declarar a interface aqui, no consumidor, evita o ciclo de import que existiria
+// ao referenciar typebot_service diretamente: ele depende de sendMessage_service,
+// que depende deste pacote.
+type TypebotProcessor interface {
+	ProcessMessage(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool)
+}
+
 type whatsmeowService struct {
 	instanceRepository instance_repository.InstanceRepository
 	authDB             *sql.DB
+	typebotProcessor   TypebotProcessor
 	messageRepository  message_repository.MessageRepository
 	labelRepository    label_repository.LabelRepository
 	pollService        poll_service.PollService // NOVO: Serviço de enquetes
@@ -1225,6 +1243,15 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// se ignoreGroup for true e o chat for grupo retorna
 		if mycli.Instance.IgnoreGroups && strings.Contains(evt.Info.Chat.String(), "@g.us") {
 			return
+		}
+
+		// Typebot. Fica depois das checagens de broadcast e grupo para respeitar
+		// as mesmas exclusões, e só trata texto — mensagens de mídia não abrem
+		// nem avançam conversa.
+		if text := evt.Message.GetConversation(); text != "" {
+			mycli.service.DispatchToTypebot(mycli.Instance, evt.Info.Chat.String(), evt.Info.PushName, text, evt.Info.IsFromMe)
+		} else if extended := evt.Message.GetExtendedTextMessage().GetText(); extended != "" {
+			mycli.service.DispatchToTypebot(mycli.Instance, evt.Info.Chat.String(), evt.Info.PushName, extended, evt.Info.IsFromMe)
 		}
 
 		// Verifica advanced settings para ignorar grupos
@@ -2973,6 +3000,23 @@ func NewWhatsmeowService(
 		runtimes:           make(map[string]*instanceRuntime),
 		reconnects:         make(map[string]*reconnectRuntime),
 	}
+}
+
+// SetTypebotService liga o processador do Typebot. É chamado uma única vez no
+// boot, antes de qualquer cliente subir — daí não precisar de trava: a escrita
+// acontece antes de existir qualquer goroutine que leia o campo.
+func (w *whatsmeowService) SetTypebotService(processor TypebotProcessor) {
+	w.typebotProcessor = processor
+}
+
+// DispatchToTypebot repassa a mensagem ao Typebot numa goroutine própria. Sem
+// isso, a chamada HTTP (até 30s de timeout) seguraria a goroutine de despacho de
+// eventos do whatsmeow e atrasaria todo o restante daquela instância.
+func (w whatsmeowService) DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool) {
+	if w.typebotProcessor == nil || instance == nil {
+		return
+	}
+	go w.typebotProcessor.ProcessMessage(instance, remoteJid, pushName, content, fromMe)
 }
 
 // GetPollService retorna o serviço de polls (evita dupla inicialização)
