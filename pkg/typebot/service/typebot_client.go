@@ -19,11 +19,35 @@ import (
 type typebotResponse struct {
 	SessionID string           `json:"sessionId"`
 	Messages  []typebotMessage `json:"messages"`
+	// Input presente significa que o fluxo parou num passo esperando o contato
+	// responder. Ausente, o fluxo chegou ao fim — é o único sinal que o Typebot
+	// dá disso, e é o que permite encerrar a sessão em vez de deixá-la aberta
+	// apontando para um sessionId que o Typebot já descartou.
+	Input *typebotInput `json:"input"`
 	// ClientSideActions são passos que o Typebot espera que o CLIENTE execute
 	// (rodar um script, esperar N segundos) antes de continuar. O Evolution API
 	// consegue rodar os scripts porque é Node; em Go não há motor de JavaScript,
 	// então só o "wait" é honrado — ver handleClientSideActions.
 	ClientSideActions []clientSideAction `json:"clientSideActions"`
+}
+
+// typebotInput só precisa existir ou não; o tipo é registrado para diagnóstico.
+type typebotInput struct {
+	Type string `json:"type"`
+}
+
+// awaitsUser informa se a conversa continua — porque o fluxo espera uma resposta
+// do contato, ou porque pediu uma ação de cliente e aguarda o retorno dela.
+func (r *typebotResponse) awaitsUser() bool {
+	if r.Input != nil {
+		return true
+	}
+	for _, action := range r.ClientSideActions {
+		if action.ExpectsDedicatedReply {
+			return true
+		}
+	}
+	return false
 }
 
 type clientSideAction struct {

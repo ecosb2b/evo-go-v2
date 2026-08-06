@@ -245,8 +245,22 @@ func (t *typebotService) ProcessMessage(instance *instance_model.Instance, remot
 
 	t.deliver(bot, instance, session, reply)
 
-	session.AwaitUser = true
-	session.Status = typebot_model.SessionOpened
+	// Fim de fluxo: sem input e sem ação pendente, o Typebot não tem mais passos.
+	// Manter a sessão aberta faria a próxima mensagem ir para continueChat com um
+	// sessionId que o Typebot já descartou — respondendo vazio, o que acabaria
+	// disparando o unknownMessage sem motivo.
+	//
+	// Encerrando aqui, a próxima mensagem começa um fluxo novo pela saudação, que
+	// é o comportamento esperado de quem volta a falar depois de terminar.
+	if reply.awaitsUser() {
+		session.AwaitUser = true
+		session.Status = typebot_model.SessionOpened
+	} else {
+		session.AwaitUser = false
+		session.Status = typebot_model.SessionClosed
+		log.LogInfo("[%s] typebot: fluxo concluído para %s, sessão encerrada", instance.Id, remoteJid)
+	}
+
 	if err := t.typebotRepository.UpdateSession(session); err != nil {
 		log.LogError("[%s] typebot: erro ao atualizar sessão de %s: %v", instance.Id, remoteJid, err)
 	}

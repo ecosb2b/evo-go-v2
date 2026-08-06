@@ -83,6 +83,59 @@ func TestParseRealStartChatResponse(t *testing.T) {
 	}
 }
 
+// TestAwaitsUser cobre a decisão de encerrar ou manter a sessão. Errar aqui tem
+// consequência visível: manter aberta uma sessão que o Typebot já descartou faz a
+// próxima mensagem cair no unknownMessage, e encerrar cedo demais faz o contato
+// receber a saudação no meio da conversa.
+func TestAwaitsUser(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			"input presente: fluxo espera resposta",
+			`{"messages":[],"input":{"type":"text input"}}`,
+			true,
+		},
+		{
+			"sem input: fluxo terminou",
+			`{"messages":[{"type":"text"}]}`,
+			false,
+		},
+		{
+			"input null equivale a ausente",
+			`{"messages":[],"input":null}`,
+			false,
+		},
+		{
+			// O passo de script devolve messages e input vazios, mas a conversa
+			// não acabou — o Typebot aguarda o retorno da ação.
+			"acao de cliente aguardando retorno",
+			`{"messages":[],"clientSideActions":[{"type":"setVariable","expectsDedicatedReply":true}]}`,
+			true,
+		},
+		{
+			// Um wait não espera retorno: se não há input, o fluxo acabou mesmo.
+			"wait nao segura a sessao",
+			`{"messages":[],"clientSideActions":[{"type":"wait","wait":{"secondsToWaitFor":2}}]}`,
+			false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parsed typebotResponse
+			if err := json.Unmarshal([]byte(tc.body), &parsed); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := parsed.awaitsUser(); got != tc.want {
+				t.Errorf("awaitsUser() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRenderElementFormatting cobre o caminho em que o Typebot manda a formatação
 // como atributo, em vez de marcação escrita no texto.
 func TestRenderElementFormatting(t *testing.T) {
