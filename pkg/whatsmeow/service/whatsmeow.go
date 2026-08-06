@@ -67,6 +67,12 @@ type WhatsmeowService interface {
 	ScheduleReconnect(instanceId string)
 	ClearInstanceCache(instanceId string, token string) error
 	CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte)
+	// SendOperationalEvent publica um evento de operação — hoje só a pausa
+	// automática do Typebot — SEM passar pelo filtro de assinaturas do
+	// CallWebhook. Um alerta de proteção não deveria depender de a instância ter
+	// assinado o evento certo: é justamente quando algo deu errado que ele
+	// precisa chegar.
+	SendOperationalEvent(instance *instance_model.Instance, event string, data map[string]any)
 	SendToGlobalQueues(event string, jsonData []byte, userId string)
 	ForceUpdateJid(instanceId string, number string) error
 	UpdateInstanceSettings(instanceId string) error
@@ -2287,6 +2293,36 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	} else {
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] ===== WEBHOOK SKIPPED ===== doWebhook=false", mycli.userID)
 	}
+}
+
+// SendOperationalEvent entrega um evento de operação direto ao webhook da
+// instância, sem consultar instance.Events.
+//
+// O CallWebhook descarta eventos que a instância não assinou, o que é correto
+// para eventos de negócio. Para um alerta de proteção esse comportamento seria
+// perverso: quem não configurou a assinatura é exatamente quem mais precisa
+// receber o aviso.
+func (w *whatsmeowService) SendOperationalEvent(instance *instance_model.Instance, event string, data map[string]any) {
+	if instance == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"event":         event,
+		"instanceId":    instance.Id,
+		"instanceName":  instance.Name,
+		"instanceToken": instance.Token,
+		"data":          data,
+	}
+
+	values, err := json.Marshal(payload)
+	if err != nil {
+		w.loggerWrapper.GetLogger(instance.Id).LogError("[%s] erro ao serializar evento operacional %s: %v", instance.Id, event, err)
+		return
+	}
+
+	queueName := strings.ToLower(fmt.Sprintf("%s.%s", instance.Id, event))
+	go w.sendToQueueOrWebhook(instance, queueName, values)
 }
 
 func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte) {

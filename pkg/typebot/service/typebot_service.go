@@ -7,6 +7,7 @@ import (
 
 	"github.com/evolution-foundation/evolution-go/pkg/config"
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
+	instance_repository "github.com/evolution-foundation/evolution-go/pkg/instance/repository"
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
 	send_service "github.com/evolution-foundation/evolution-go/pkg/sendMessage/service"
 	typebot_model "github.com/evolution-foundation/evolution-go/pkg/typebot/model"
@@ -31,11 +32,17 @@ type typebotService struct {
 	config            *config.Config
 	loggerWrapper     *logger_wrapper.LoggerManager
 	httpClient        *http.Client
+
+	selfJids *selfJidCache
+	buckets  *bucketRegistry
+	alerts   AlertEmitter
 }
 
 func NewTypebotService(
 	typebotRepository typebot_repository.TypebotRepository,
+	instanceRepository instance_repository.InstanceRepository,
 	sendService send_service.SendService,
+	alerts AlertEmitter,
 	config *config.Config,
 	loggerWrapper *logger_wrapper.LoggerManager,
 ) TypebotService {
@@ -45,7 +52,73 @@ func NewTypebotService(
 		config:            config,
 		loggerWrapper:     loggerWrapper,
 		httpClient:        &http.Client{Timeout: typebotHTTPTimeout},
+
+		selfJids: newSelfJidCache(instanceRepository),
+		buckets:  newBucketRegistry(config.TypebotSendRateLimit, config.TypebotSendRateBurst),
+		alerts:   alerts,
 	}
+}
+
+// pauseSession encerra o atendimento automático de um contato e avisa quem
+// opera. A pausa é reversível pelo endpoint /typebot/changeStatus.
+//
+// O alerta importa tanto quanto a pausa: sem ele a proteção age em silêncio, e
+// um contato legítimo pausado por engano só seria descoberto quando alguém
+// reclamasse.
+func (t *typebotService) pauseSession(
+	instance *instance_model.Instance,
+	session *typebot_model.TypebotSession,
+	reason string,
+	detail map[string]any,
+) {
+	log := t.loggerWrapper.GetLogger(instance.Id)
+
+	session.Status = typebot_model.SessionPaused
+	session.PausedReason = reason
+	if err := t.typebotRepository.UpdateSession(session); err != nil {
+		log.LogError("[%s] typebot: erro ao pausar sessão de %s: %v", instance.Id, session.RemoteJid, err)
+		return
+	}
+
+	log.LogWarn("[%s] typebot: sessão de %s pausada automaticamente (%s) %v",
+		instance.Id, session.RemoteJid, reason, detail)
+
+	if t.alerts == nil {
+		return
+	}
+	payload := map[string]any{
+		"remoteJid": session.RemoteJid,
+		"sessionId": session.Id,
+		"reason":    reason,
+	}
+	for k, v := range detail {
+		payload[k] = v
+	}
+	t.alerts.SendOperationalEvent(instance, "TypebotAutoPaused", payload)
+}
+
+// withinContactRate conta as mensagens do contato numa janela deslizante e
+// devolve false quando o limite estoura.
+//
+// A contagem vive na sessão para sobreviver a um restart: zerar o contador
+// quando o processo reinicia daria ao contato em flood exatamente a folga que a
+// proteção existe para negar.
+func (t *typebotService) withinContactRate(session *typebot_model.TypebotSession) (bool, int) {
+	limit := t.config.TypebotContactRateLimit
+	window := time.Duration(t.config.TypebotContactRateWindow) * time.Second
+
+	if limit <= 0 || window <= 0 {
+		return true, 0
+	}
+
+	now := time.Now()
+	if session.WindowStart.IsZero() || now.Sub(session.WindowStart) > window {
+		session.WindowStart = now
+		session.MsgCount = 0
+	}
+
+	session.MsgCount++
+	return session.MsgCount <= limit, session.MsgCount
 }
 
 // ProcessMessage implementa a máquina de estados. A ordem das checagens importa:
@@ -56,6 +129,15 @@ func (t *typebotService) ProcessMessage(instance *instance_model.Instance, remot
 
 	// Status broadcast não é conversa.
 	if remoteJid == "status@broadcast" || remoteJid == "" {
+		return
+	}
+
+	// Antes de qualquer coisa: se o remetente é outra instância deste servidor,
+	// responder cria um laço em que os dois lados se alimentam sem parar. Vem
+	// antes até da busca do bot porque é a única checagem que não admite
+	// exceção.
+	if t.selfJids.contains(remoteJid) {
+		log.LogWarn("[%s] typebot: %s é uma instância deste servidor, ignorado para evitar laço", instance.Id, remoteJid)
 		return
 	}
 
@@ -107,6 +189,19 @@ func (t *typebotService) ProcessMessage(instance *instance_model.Instance, remot
 				}
 				session = nil
 			}
+		}
+	}
+
+	// O limite por contato é avaliado antes de falar com o Typebot: o objetivo é
+	// cortar no gateway, sem gastar a chamada externa nem produzir resposta.
+	if session != nil {
+		if ok, count := t.withinContactRate(session); !ok {
+			t.pauseSession(instance, session, ReasonRateLimit, map[string]any{
+				"messages":      count,
+				"windowSeconds": t.config.TypebotContactRateWindow,
+				"limit":         t.config.TypebotContactRateLimit,
+			})
+			return
 		}
 	}
 
@@ -276,6 +371,13 @@ func (t *typebotService) sendText(
 	instance *instance_model.Instance,
 	remoteJid, text string,
 ) error {
+	// O teto por instância é aplicado no envio, não na entrada: o que o WhatsApp
+	// mede é quanto o número manda, e uma resposta pode conter várias mensagens.
+	if waited := t.buckets.wait(instance.Id); waited > 0 {
+		t.loggerWrapper.GetLogger(instance.Id).LogInfo(
+			"[%s] typebot: envio para %s aguardou %s pelo teto da instância", instance.Id, remoteJid, waited)
+	}
+
 	_, err := t.sendService.SendText(&send_service.TextStruct{
 		Number: numberFromJid(remoteJid),
 		Text:   text,
@@ -292,6 +394,8 @@ func (t *typebotService) sendMedia(
 	instance *instance_model.Instance,
 	remoteJid, mediaType, url string,
 ) error {
+	t.buckets.wait(instance.Id)
+
 	_, err := t.sendService.SendMediaUrl(&send_service.MediaStruct{
 		Number: numberFromJid(remoteJid),
 		Url:    url,

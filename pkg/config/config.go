@@ -62,6 +62,12 @@ type Config struct {
 	QrcodeMaxCount       int
 	CheckUserExists      bool
 
+	// Proteções do Typebot. Ver pkg/typebot/service/protection.go.
+	TypebotContactRateLimit  int
+	TypebotContactRateWindow int
+	TypebotSendRateLimit     int
+	TypebotSendRateBurst     int
+
 	// Logger configurations
 	LogMaxSize    int
 	LogMaxBackups int
@@ -316,6 +322,20 @@ func Load() *Config {
 		natsGlobalEvents = []string{}
 	}
 
+	// Proteções do Typebot.
+	//
+	// O limite por contato vem ligado: ele só age sobre quem manda muitas
+	// mensagens seguidas, e nenhuma conversa humana chega perto disso.
+	//
+	// Já o teto de envio por instância vem DESLIGADO. Ele age sobre o volume
+	// somado de todos os contatos, e um valor mal calibrado atrasaria respostas
+	// legítimas num pico normal de atendimento. Suba para 20 quando quiser a
+	// proteção contra rajada.
+	typebotContactRateLimit := envInt(config_env.TYPEBOT_CONTACT_RATE_LIMIT, 10)
+	typebotContactRateWindow := envInt(config_env.TYPEBOT_CONTACT_RATE_WINDOW, 60)
+	typebotSendRateLimit := envInt(config_env.TYPEBOT_SEND_RATE_LIMIT, 0)
+	typebotSendRateBurst := envInt(config_env.TYPEBOT_SEND_RATE_BURST, 20)
+
 	// Logger configurations
 	logMaxSize, _ := strconv.Atoi(os.Getenv(config_env.LOG_MAX_SIZE))
 	if logMaxSize == 0 {
@@ -385,6 +405,11 @@ func Load() *Config {
 		LogMaxAge:            logMaxAge,
 		LogDirectory:         logDirectory,
 		LogCompress:          logCompress,
+
+		TypebotContactRateLimit:  typebotContactRateLimit,
+		TypebotContactRateWindow: typebotContactRateWindow,
+		TypebotSendRateLimit:     typebotSendRateLimit,
+		TypebotSendRateBurst:     typebotSendRateBurst,
 	}
 
 	minioEnabled := os.Getenv(config_env.MINIO_ENABLED) == "true"
@@ -419,6 +444,22 @@ func loadMinioConfig(config *Config) {
 	config.MinioBucket = minioBucket
 	config.MinioUseSSL = minioUseSSL
 	config.MinioRegion = minioRegion
+}
+
+// envInt lê um inteiro do ambiente, caindo no padrão quando a variável está
+// ausente ou não é um número. Valor inválido não derruba o serviço: o padrão é
+// seguro, e uma proteção configurada errado não deve impedir o boot.
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		logger.LogWarn("[CONFIG] %s inválido (%q), usando %d", key, raw, fallback)
+		return fallback
+	}
+	return value
 }
 
 func panicIfEmpty(key, value string) {

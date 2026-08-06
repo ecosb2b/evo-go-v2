@@ -91,6 +91,18 @@ type TypebotSession struct {
 	// contato responder.
 	AwaitUser bool `json:"awaitUser" gorm:"default:false"`
 
+	// Contagem para o limite por contato. Fica na sessão, e não em memória,
+	// porque a sessão já é gravada a cada mensagem — o custo é praticamente
+	// zero e o estado sobrevive a um restart, que é justamente quando um
+	// contato em flood não deveria ganhar contador zerado.
+	MsgCount    int       `json:"msgCount" gorm:"default:0"`
+	WindowStart time.Time `json:"windowStart"`
+
+	// PausedReason registra por que uma pausa automática aconteceu, para que a
+	// origem continue visível depois — o webhook de alerta é entregue uma vez
+	// só e pode se perder.
+	PausedReason string `json:"pausedReason"`
+
 	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }

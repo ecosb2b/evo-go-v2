@@ -46,6 +46,13 @@ const (
 	QRCODE_MAX_COUNT        = "QRCODE_MAX_COUNT"
 	CHECK_USER_EXISTS       = "CHECK_USER_EXISTS"
 
+	// Proteções do Typebot contra flood e laço. Todas lidas no boot: alterar
+	// exige recriar o container, não imagem nova.
+	TYPEBOT_CONTACT_RATE_LIMIT  = "TYPEBOT_CONTACT_RATE_LIMIT"
+	TYPEBOT_CONTACT_RATE_WINDOW = "TYPEBOT_CONTACT_RATE_WINDOW"
+	TYPEBOT_SEND_RATE_LIMIT     = "TYPEBOT_SEND_RATE_LIMIT"
+	TYPEBOT_SEND_RATE_BURST     = "TYPEBOT_SEND_RATE_BURST"
+
 	// Logger configurations
 	LOG_MAX_SIZE    = "LOG_MAX_SIZE"
 	LOG_MAX_BACKUPS = "LOG_MAX_BACKUPS"

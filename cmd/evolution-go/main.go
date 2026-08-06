@@ -205,7 +205,14 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 
 	// O Typebot responde pela própria instância, então consome o sendMessageService.
 	// É registrado no whatsmeowService para ser chamado quando uma mensagem chega.
-	typebotService := typebot_service.NewTypebotService(typebotRepository, sendMessageService, config, loggerWrapper)
+	typebotService := typebot_service.NewTypebotService(
+		typebotRepository,
+		instanceRepository,
+		sendMessageService,
+		whatsmeowService, // emissor dos alertas de pausa automática
+		config,
+		loggerWrapper,
+	)
 	whatsmeowService.SetTypebotService(typebotService)
 
 	// NOVO: PollHandler usando PollService já inicializado no whatsmeowService (evita dupla inicialização)
