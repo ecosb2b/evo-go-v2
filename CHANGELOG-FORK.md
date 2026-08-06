@@ -12,6 +12,76 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.7.5 — 2026-08-06
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.5`
+**Digest:** `sha256:7d664fcff9249d9752324af1b36fbb1867d56bcbbeb97c0681160ff067464683`
+**Commit:** `9f9b911`
+
+### Proteções contra laço e flood
+
+Nada na integração agia **durante** um flood: `expire`, `keywordFinish` e
+`stopBotFromMe` dependem de inatividade ou de alguém intervir — as duas coisas
+que um laço nunca dá. O ativo em risco é o número: o WhatsApp bane por volume e
+padrão, e bot respondendo bot produz os dois.
+
+**Guarda de auto-laço.** O remetente é comparado com os JIDs das instâncias
+deste servidor. Duas instâncias suas conversando não têm freio natural, e é o
+caminho mais rápido para perder um número. A comparação descarta o sufixo de
+aparelho: o JID gravado traz `:7@s.whatsapp.net` e o remetente chega sem ele.
+
+**Limite por contato.** 10 mensagens em 60s por padrão, avaliado antes de chamar
+o Typebot. Ao estourar, a sessão vai para `paused`.
+
+**Teto de envio por instância.** Balde de fichas, **desligado por padrão**. Cobre
+o caso que o limite por contato não pega: cem contatos com nove mensagens cada
+não estouram nenhum limite individual, mas produzem novecentos envios em rajada.
+
+**Alerta.** Toda pausa automática emite `TypebotAutoPaused` pelo webhook,
+ignorando o filtro de assinaturas — quem não configurou o evento é exatamente
+quem precisa saber que algo deu errado.
+
+O caminho do webhook não é afetado: as proteções rodam na goroutine de despacho e
+só impedem o bot de responder. As mensagens continuam chegando, e um contato
+pausado pode ser roteado para atendimento humano.
+
+### Novo endpoint
+
+```
+POST /typebot/changeStatus   { "remoteJid": "...", "status": "paused" }
+```
+
+Encerra, pausa ou reabre pelo JID do contato — a chave que uma automação externa
+conhece. Responde `404` quando não há sessão, em vez de `200` silencioso.
+
+**Atenção:** `closed` **não** silencia um contato; ele limpa a sessão e a próxima
+mensagem recomeça pela saudação. Para parar de responder a alguém, use `paused`.
+
+### Fim de fluxo detectado
+
+A sessão era marcada como `opened` após cada resposta, incondicionalmente, e o
+fim do fluxo nunca era percebido. A mensagem seguinte ia para `continueChat` com
+um `sessionId` que o Typebot já havia descartado — respondendo vazio, o que
+disparava o `unknownMessage` sem motivo.
+
+O campo `input` passou a ser lido: ausente significa que não há mais passos. Um
+passo de script também devolve `input` vazio sem ter terminado, então
+`expectsDedicatedReply` é verificado junto.
+
+### Configuração
+
+```yaml
+TYPEBOT_CONTACT_RATE_LIMIT: "10"     # 0 desliga
+TYPEBOT_CONTACT_RATE_WINDOW: "60"
+TYPEBOT_SEND_RATE_LIMIT: "0"         # 20 liga o teto por instância
+TYPEBOT_SEND_RATE_BURST: "20"
+```
+
+Valor inválido não impede o boot: cai no padrão com aviso no log. As colunas
+novas da sessão são criadas pelo `AutoMigrate`.
+
+---
+
 ## 0.7.4 — 2026-08-06
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.4`
