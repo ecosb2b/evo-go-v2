@@ -1,82 +1,23 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Evolution GO Manager</title>
-    <script type="module" crossorigin src="/assets/index-B7iM18f_.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B6NZfWVh.css">
+    <script type="module" crossorigin src="/assets/index-C8R1H-5o.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Bq1Yakxr.css">
   </head>
   <body>
     <div id="root"></div>
-    <!-- [Athene] Injeta o dashboard customizado dentro da aba Dashboard do manager,
-         substituindo o placeholder "Dashboard content will be implemented here...".
-         Como so temos o build do front, fazemos via DOM (sem tocar no JS minificado). -->
-    <script>
-      (function () {
-        var PHRASE = "Dashboard content will be implemented here";
-        function findPlaceholder() {
-          var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-          var n;
-          while ((n = w.nextNode())) {
-            if (n.nodeValue && n.nodeValue.indexOf(PHRASE) > -1) return n.parentElement;
-          }
-          return null;
-        }
-        // Ajusta a altura do iframe ao conteudo (same-origin), evitando scroll
-        // interno e espaco vazio acima/abaixo.
-        function sizeFrame(frame) {
-          try {
-            var h = frame.contentWindow.document.documentElement.scrollHeight;
-            if (h && Math.abs((parseInt(frame.style.height, 10) || 0) - h) > 4) {
-              frame.style.height = h + "px";
-            }
-          } catch (e) {}
-        }
-        // Acha o H1 "Dashboard" (o titulo da pagina; o item do menu lateral e SPAN).
-        function findTitle() {
-          var hs = document.querySelectorAll("h1");
-          for (var i = 0; i < hs.length; i++) {
-            if (hs[i].textContent.trim() === "Dashboard") return hs[i];
-          }
-          return null;
-        }
-        function inject() {
-          var title = findTitle();
-          if (!title) return; // nao esta na aba Dashboard
-          var container = title.parentElement; // DIV.p-6, dentro do MAIN rolavel
-          if (!container) return;
-          var frame = document.getElementById("egogo-dash-frame");
-          if (frame && frame.isConnected) {
-            if (frame.parentElement === container) { sizeFrame(frame); return; }
-            frame.remove(); // estava no lugar errado (ex.: solto no body) -> reinjeta
-          }
-          var ph = findPlaceholder();
-          if (ph) ph.remove();
-          frame = document.createElement("iframe");
-          frame.id = "egogo-dash-frame";
-          frame.src = "/dashboard?embed=1";
-          frame.setAttribute("scrolling", "no");
-          frame.style.cssText =
-            "width:100%;height:640px;border:0;border-radius:12px;display:block;overflow:hidden;margin-top:8px";
-          frame.addEventListener("load", function () { sizeFrame(frame); });
-          container.appendChild(frame); // logo abaixo do titulo, no lugar certo
-        }
-        var obs = new MutationObserver(inject);
-        obs.observe(document.documentElement, { childList: true, subtree: true });
-        document.addEventListener("DOMContentLoaded", inject);
-        setInterval(inject, 800); // fallback p/ navegacao client-side do SPA
-      })();
-    </script>
-    <!-- [Athene] Seção "Salvar contato" (/user/savecontact) dentro do modal
-         "Testar mensagens". A apikey da instância é obtida AUTOMATICAMENTE:
-         interceptamos o fetch do manager pra capturar o token de cada instância
+<!-- [Athene] SeÃ§Ã£o "Salvar contato" (/user/savecontact) dentro do modal
+         "Testar mensagens". A apikey da instÃ¢ncia Ã© obtida AUTOMATICAMENTE:
+         interceptamos o fetch do manager pra capturar o token de cada instÃ¢ncia
          (campo `token` do /instance/all) e o header apikey das chamadas /send|/user.
-         Sem campo manual — o token certo é escolhido pelo nome da instância no modal. -->
+         Sem campo manual â€” o token certo Ã© escolhido pelo nome da instÃ¢ncia no modal. -->
     <script>
       (function () {
-        // 1) Patch do fetch pra capturar tokens de instância automaticamente.
+        // 1) Patch do fetch pra capturar tokens de instÃ¢ncia automaticamente.
         if (!window.__atheneFetchPatched) {
           window.__atheneFetchPatched = true;
           window.__atheneTokens = {};
@@ -144,9 +85,9 @@
             "border-top:1px solid var(--border,#333);margin-top:14px;padding-top:12px";
           block.innerHTML =
             '<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Salvar contato (/user/savecontact)</p>' +
-            '<p class="mb-2 text-xs text-muted-foreground">Usa o <b>número de destino</b> acima como contato a salvar. O token da instância é detectado automaticamente.</p>' +
+            '<p class="mb-2 text-xs text-muted-foreground">Usa o <b>nÃºmero de destino</b> acima como contato a salvar. O token da instÃ¢ncia Ã© detectado automaticamente.</p>' +
             '<input id="ath-sc-name" placeholder="Nome do contato (fullName)" class="' + INPUT_CLS + '" style="margin-bottom:8px" type="text" />' +
-            '<label class="flex items-center gap-2 text-sm text-foreground" style="margin-bottom:10px"><input id="ath-sc-phone" type="checkbox" checked /> Salvar também na agenda do celular</label>' +
+            '<label class="flex items-center gap-2 text-sm text-foreground" style="margin-bottom:10px"><input id="ath-sc-phone" type="checkbox" checked /> Salvar tambÃ©m na agenda do celular</label>' +
             '<button id="ath-sc-btn" type="button" class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Salvar contato</button>' +
             '<div id="ath-sc-result" class="text-xs" style="margin-top:8px;min-height:16px;word-break:break-word"></div>';
 
@@ -160,9 +101,9 @@
             var phone = block.querySelector("#ath-sc-phone").checked;
             var res = block.querySelector("#ath-sc-result");
             var key = instanceTokenFor(instName);
-            if (!num) { res.style.color = "#ef4444"; res.textContent = "Preencha o número de destino acima."; return; }
+            if (!num) { res.style.color = "#ef4444"; res.textContent = "Preencha o nÃºmero de destino acima."; return; }
             if (!name) { res.style.color = "#ef4444"; res.textContent = "Preencha o nome do contato."; return; }
-            if (!key) { res.style.color = "#ef4444"; res.textContent = "Token da instância não detectado. Recarregue a página (F5) e tente de novo."; return; }
+            if (!key) { res.style.color = "#ef4444"; res.textContent = "Token da instÃ¢ncia nÃ£o detectado. Recarregue a pÃ¡gina (F5) e tente de novo."; return; }
             res.style.color = "#a3a3a3"; res.textContent = "Salvando...";
             fetch("/user/savecontact", {
               method: "POST",
@@ -182,13 +123,13 @@
         setInterval(injectSaveContact, 700);
       })();
     </script>
-    <!-- [Athene] Página de Configurações da instância: adiciona (1) card de Proxy
+    <!-- [Athene] PÃ¡gina de ConfiguraÃ§Ãµes da instÃ¢ncia: adiciona (1) card de Proxy
          (ver/definir/remover) usando POST|DELETE /instance/proxy/{id} e lendo o
-         proxy atual de /instance/info/{id}; (2) suporte a MÚLTIPLOS webhooks —
-         transforma o campo único "URL do Webhook" numa lista de N endereços,
+         proxy atual de /instance/info/{id}; (2) suporte a MÃšLTIPLOS webhooks â€”
+         transforma o campo Ãºnico "URL do Webhook" numa lista de N endereÃ§os,
          sincronizando o input controlado do React (junta por \n) para reaproveitar
-         o botão "Salvar Webhook" já existente. O backend faz o fan-out da mesma
-         requisição para todos os endereços (webhook_producer.splitWebhookURLs).
+         o botÃ£o "Salvar Webhook" jÃ¡ existente. O backend faz o fan-out da mesma
+         requisiÃ§Ã£o para todos os endereÃ§os (webhook_producer.splitWebhookURLs).
          Auth admin (apikey global) vem de localStorage["evolution-auth"].state.apiKey. -->
     <script>
       (function () {
@@ -256,8 +197,8 @@
           var id = instId();
           if (!id) return;
           if (document.getElementById("athene-proxy-card")) return;
-          var whHead = findLeaf("Configurações de Webhook");
-          var advHead = findLeaf("Configurações Avançadas");
+          var whHead = findLeaf("ConfiguraÃ§Ãµes de Webhook");
+          var advHead = findLeaf("ConfiguraÃ§Ãµes AvanÃ§adas");
           if (!whHead || !advHead) return;
           var col = commonAncestor(whHead, advHead);
           var whCard = childContaining(col, whHead);
@@ -265,15 +206,15 @@
 
           var card = document.createElement("div");
           card.id = "athene-proxy-card";
-          card.className = whCard.className; // mesma aparência dos demais cards
+          card.className = whCard.className; // mesma aparÃªncia dos demais cards
           card.innerHTML =
-            '<h3 style="font-weight:600;font-size:1.05rem;margin-bottom:4px">Configurações de Proxy</h3>' +
-            '<p id="athp-status" style="font-size:12px;margin-bottom:12px;color:var(--muted-foreground,#a3a3a3)">Carregando…</p>' +
+            '<h3 style="font-weight:600;font-size:1.05rem;margin-bottom:4px">ConfiguraÃ§Ãµes de Proxy</h3>' +
+            '<p id="athp-status" style="font-size:12px;margin-bottom:12px;color:var(--muted-foreground,#a3a3a3)">Carregandoâ€¦</p>' +
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
             '<div><label class="athl">Host</label><input id="athp-host" class="' + INPUT_CLS + '" placeholder="ex.: 172.18.0.1"></div>' +
             '<div><label class="athl">Porta</label><input id="athp-port" class="' + INPUT_CLS + '" placeholder="ex.: 20326"></div>' +
             '<div><label class="athl">Protocolo</label><select id="athp-proto" class="' + INPUT_CLS + '"><option value="http">http</option><option value="https">https</option><option value="socks5">socks5</option></select></div>' +
-            '<div><label class="athl">Usuário (opcional)</label><input id="athp-user" class="' + INPUT_CLS + '" placeholder="vazio se sem auth"></div>' +
+            '<div><label class="athl">UsuÃ¡rio (opcional)</label><input id="athp-user" class="' + INPUT_CLS + '" placeholder="vazio se sem auth"></div>' +
             '<div style="grid-column:1/3"><label class="athl">Senha (opcional)</label><input id="athp-pass" type="password" class="' + INPUT_CLS + '" placeholder="vazio se sem auth"></div>' +
             '</div>' +
             '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">' +
@@ -309,15 +250,15 @@
                   status.textContent = "Proxy atual: " + (p.protocol || "http") + "://" + (p.username ? "***@" : "") + p.host + ":" + p.port;
                 } else {
                   status.style.color = "var(--muted-foreground,#a3a3a3)";
-                  status.textContent = "Nenhum proxy configurado nesta instância.";
+                  status.textContent = "Nenhum proxy configurado nesta instÃ¢ncia.";
                 }
               })
               .catch(function (e) { status.style.color = "#ef4444"; status.textContent = "Falha ao ler proxy: " + e.message; });
           }
           card.querySelector("#athp-save").onclick = function () {
             var h = host.value.trim(), pt = port.value.trim();
-            if (!h || !pt) { setRes("#ef4444", "Host e porta são obrigatórios."); return; }
-            setRes("#a3a3a3", "Salvando… (a instância vai reconectar para aplicar)");
+            if (!h || !pt) { setRes("#ef4444", "Host e porta sÃ£o obrigatÃ³rios."); return; }
+            setRes("#a3a3a3", "Salvandoâ€¦ (a instÃ¢ncia vai reconectar para aplicar)");
             fetch(apiBase() + "/instance/proxy/" + id, {
               method: "POST",
               headers: { apikey: adminKey(), "Content-Type": "application/json" },
@@ -325,19 +266,19 @@
             })
               .then(async function (r) {
                 var t = await r.text();
-                if (r.ok) { setRes("#10b981", "Proxy salvo. Reconectando para aplicar…"); loadProxy(); }
+                if (r.ok) { setRes("#10b981", "Proxy salvo. Reconectando para aplicarâ€¦"); loadProxy(); }
                 else setRes("#ef4444", "Erro " + r.status + ": " + t);
               })
               .catch(function (e) { setRes("#ef4444", "Falha: " + e.message); });
           };
           card.querySelector("#athp-del").onclick = function () {
-            setRes("#a3a3a3", "Removendo…");
+            setRes("#a3a3a3", "Removendoâ€¦");
             fetch(apiBase() + "/instance/proxy/" + id, { method: "DELETE", headers: { apikey: adminKey() } })
               .then(async function (r) {
                 var t = await r.text();
                 if (r.ok) {
                   host.value = ""; port.value = ""; user.value = ""; pass.value = ""; proto.value = "http";
-                  setRes("#10b981", "Proxy removido. Reconectando…"); loadProxy();
+                  setRes("#10b981", "Proxy removido. Reconectandoâ€¦"); loadProxy();
                 } else setRes("#ef4444", "Erro " + r.status + ": " + t);
               })
               .catch(function (e) { setRes("#ef4444", "Falha: " + e.message); });
@@ -345,7 +286,7 @@
           loadProxy();
         }
 
-        // ---------- (2) Múltiplos webhooks ----------
+        // ---------- (2) MÃºltiplos webhooks ----------
         function injectWebhookMulti() {
           if (!instId()) return;
           var inp = null, inputs = document.querySelectorAll("input");
@@ -379,9 +320,9 @@
               ri.placeholder = "https://seu-servidor.com/webhook";
               ri.oninput = function () { urls[idx] = ri.value; sync(); };
               var rm = document.createElement("button");
-              rm.type = "button"; rm.textContent = "✕";
+              rm.type = "button"; rm.textContent = "âœ•";
               rm.className = BTN_SEC + " athrm";
-              rm.title = "Remover este endereço";
+              rm.title = "Remover este endereÃ§o";
               rm.onclick = function () { urls.splice(idx, 1); if (urls.length === 0) urls = [""]; sync(); render(); };
               row.appendChild(ri); row.appendChild(rm); wrap.appendChild(row);
             });
@@ -391,10 +332,10 @@
             wrap.appendChild(add);
             var hint = document.createElement("p");
             hint.style.cssText = "font-size:11px;margin-top:6px;color:var(--muted-foreground,#a3a3a3)";
-            hint.textContent = 'A MESMA requisição é enviada para todos os endereços. Clique em "Salvar Webhook" (abaixo) para aplicar.';
+            hint.textContent = 'A MESMA requisiÃ§Ã£o Ã© enviada para todos os endereÃ§os. Clique em "Salvar Webhook" (abaixo) para aplicar.';
             wrap.appendChild(hint);
           }
-          render(); // não faz sync() inicial para não sobrescrever o valor já vindo do React
+          render(); // nÃ£o faz sync() inicial para nÃ£o sobrescrever o valor jÃ¡ vindo do React
         }
 
         function tick() { ensureStyle(); injectProxy(); injectWebhookMulti(); }
