@@ -12,6 +12,91 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.7.4 — 2026-08-06
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.4`
+**Digest:** `sha256:2388fb3d8f50a12c162b967d67283029c1c351446a3a876ff58fa39b718981e5`
+**Commit:** `7b7401e`
+
+### Integração com Typebot
+
+O Evolution GO não tem nenhuma integração de chatbot — ele emite eventos e para
+por aí. Esta versão traz a de Typebot, e apenas ela.
+
+Uma mensagem de texto recebida resolve o bot habilitado da instância, abre ou
+recupera a sessão daquele contato, e conversa com o Typebot pelo `startChat` /
+`continueChat`, respondendo pela própria instância. A sessão expira por
+inatividade, encerra por palavra-chave, e `stopBotFromMe` a encerra quando o
+operador escreve na conversa — é assim que um humano assume o atendimento.
+
+**Endpoints** (autenticados pelo token da instância):
+
+```
+POST   /typebot                      criar
+GET    /typebot                      listar
+PUT    /typebot/:id                  atualizar
+DELETE /typebot/:id                  remover (leva as sessões junto)
+GET    /typebot/sessions             listar sessões
+PUT    /typebot/sessions/:id/status  pause / close / reopen
+DELETE /typebot/sessions/:id         remover sessão
+```
+
+**Limitações conhecidas.** Scripts dentro de `clientSideActions` não são
+executados: não há motor de JavaScript em Go. Em vez disso o JID chega
+decomposto em `prefilledVariables` (`normalizedUserId`, `userPhone`, `userLid`,
+`jidType`), que é o que esses scripts normalmente calculam — se o seu fluxo tiver
+um bloco de script, remova-o e use essas variáveis. Quando ainda assim houver um,
+o log diz exatamente isso em vez de falhar em silêncio.
+
+Não implementados: `debounceTime`, `keepOpen`, bot de fallback e roteamento por
+keyword ou regex.
+
+### Gate próprio, sem servidor de licenciamento
+
+O upstream bloqueia todas as rotas com 503 até a licença ser ativada, e o manager
+redireciona para `license.evolutionfoundation.com.br` antes mesmo do login. Este
+fork passa a decidir isso sozinho, em `pkg/gate` — o pacote `core` **não foi
+alterado**, e `EVOLUTION_GATE_MODE=license` devolve o comportamento original sem
+mexer em código.
+
+O `core.InitializeRuntime` deixou de ser chamado: além de montar o contexto de
+licença, ele contatava o servidor a cada boot. **Nenhuma chamada externa de
+licenciamento acontece mais**, nem no boot, nem por heartbeat, nem por rota.
+
+A autenticação por apikey continua intacta — o gate era a trava comercial de
+ativação, nunca a camada de autenticação.
+
+### Manager
+
+O fonte do painel passou a ser versionado em `evolution-go-manager/`, o que
+tornou possível alterá-lo de verdade. Novidades:
+
+- **Typebot** na página de configurações da instância: formulário e lista de
+  sessões com pausar, encerrar e remover
+- **Dashboard** deixou de ser um placeholder e passa a exibir o painel real
+
+Três correções, todas da mesma família — contratos e estado que o TypeScript não
+verifica em tempo de execução, e por isso invisíveis ao `tsc`:
+
+- o QR não renderizava: o código lia `data.Qrcode` capitalizado enquanto a API
+  responde `data.qrcode`
+- o QR não se renovava sozinho: dependências instáveis reiniciavam o timer antes
+  dele completar
+- a conexão era detectada um ciclo atrasada, por ler a lista de instâncias do
+  closure após o fetch
+
+### Ao atualizar
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Fixe `:0.7.4`. Instâncias em `connected = false` continuam precisando de um
+`POST /instance/connect` uma vez — o `ConnectOnStartup` filtra por
+`connected = true`.
+
+---
+
 ## 0.7.3 — 2026-08-05
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.3`
