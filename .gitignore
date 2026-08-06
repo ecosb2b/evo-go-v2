@@ -7,8 +7,13 @@ coverage.*
 .idea/
 .vscode/
 .DS_Store
-evolution-go
+# Ancorado na raiz: sem a barra, o padrão também casa com o diretório
+# cmd/evolution-go/, e um arquivo .go novo criado ali seria ignorado em silêncio.
+/evolution-go
 server
+
+# Projeto de terceiros mantido na árvore para consulta, não versionado.
+evolution-api-monitor-oss-main/
 
 # Utilitarios temporarios (Athene)
 savecontact.patch

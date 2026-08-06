@@ -31,6 +31,15 @@ docker/
 *.sh
 Makefile
 
+# Fonte do manager. O Dockerfile compila apenas Go e copia manager/dist já
+# construído, então nada daqui entra na imagem — mas node_modules sozinho são
+# ~250 MB atravessando o contexto de build a cada docker build.
+# Para publicar alterações do painel: buildar aqui e commitar o manager/dist.
+evolution-go-manager/
+
+# Projetos de terceiros mantidos na árvore para consulta, fora do build.
+evolution-api-monitor-oss-main/
+
 # Test files
 *_test.go
 *.test
