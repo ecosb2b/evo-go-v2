@@ -21,6 +21,11 @@ type TypebotRepository interface {
 	GetSessionByRemoteJid(instanceID, remoteJid string) (*typebot_model.TypebotSession, error)
 	GetSessionsByInstanceID(instanceID string) ([]typebot_model.TypebotSession, error)
 	SetSessionStatus(instanceID, id, status string) error
+	// SetSessionStatusByRemoteJid muda o status pela chave que quem chama de fora
+	// conhece: o contato. Devolve false quando não há sessão para aquele JID, de
+	// modo que o chamador possa distinguir "encerrei" de "não havia nada" — sem
+	// isso um webhook de proteção falharia em silêncio.
+	SetSessionStatusByRemoteJid(instanceID, remoteJid, status string) (bool, error)
 }
 
 type typebotRepository struct {
@@ -122,6 +127,17 @@ func (t *typebotRepository) SetSessionStatus(instanceID, id, status string) erro
 	return t.db.Model(&typebot_model.TypebotSession{}).
 		Where("instance_id = ? AND id = ?", instanceID, id).
 		Update("status", status).Error
+}
+
+func (t *typebotRepository) SetSessionStatusByRemoteJid(instanceID, remoteJid, status string) (bool, error) {
+	result := t.db.Model(&typebot_model.TypebotSession{}).
+		Where("instance_id = ? AND remote_jid = ?", instanceID, remoteJid).
+		Update("status", status)
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
 }
 
 func NewTypebotRepository(db *gorm.DB) TypebotRepository {

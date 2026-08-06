@@ -279,6 +279,10 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			// As rotas de sessão vêm antes de /:id para o Gin não tratar
 			// "sessions" como um id de bot.
 			routes.GET("/sessions", r.typebotHandler.ListSessions)
+			// Encerra/pausa/reabre pelo JID do contato, que é a chave que uma
+			// automação externa conhece — sem precisar listar sessões antes para
+			// descobrir o id.
+			routes.POST("/changeStatus", r.typebotHandler.ChangeSessionStatus)
 			routes.PUT("/sessions/:id/status", r.typebotHandler.UpdateSessionStatus)
 			routes.DELETE("/sessions/:id", r.typebotHandler.DeleteSession)
 

@@ -18,6 +18,7 @@ type TypebotHandler interface {
 	DeleteBot(ctx *gin.Context)
 	ListSessions(ctx *gin.Context)
 	UpdateSessionStatus(ctx *gin.Context)
+	ChangeSessionStatus(ctx *gin.Context)
 	DeleteSession(ctx *gin.Context)
 }
 
@@ -284,6 +285,67 @@ func (t *typebotHandler) UpdateSessionStatus(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ChangeSessionStatus godoc
+// @Summary Change a session's status by contact JID
+// @Description Closes, pauses or reopens the session of a contact. Unlike
+// @Description /typebot/sessions/{id}/status this takes the remoteJid, which is
+// @Description what an external caller (a webhook, a rate limiter) actually has.
+// @Tags Typebot
+// @Accept json
+// @Produce json
+// @Param data body object{remoteJid=string,status=string} true "Contact JID and target status"
+// @Success 200 {object} gin.H "success"
+// @Failure 400 {object} gin.H "Error on validation"
+// @Failure 404 {object} gin.H "No session for that contact"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /typebot/changeStatus [post]
+func (t *typebotHandler) ChangeSessionStatus(ctx *gin.Context) {
+	instance, ok := instanceFromContext(ctx)
+	if !ok {
+		return
+	}
+
+	var data struct {
+		RemoteJid string `json:"remoteJid"`
+		Status    string `json:"status"`
+	}
+	if err := ctx.ShouldBindBodyWithJSON(&data); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if data.RemoteJid == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "remoteJid is required"})
+		return
+	}
+
+	switch data.Status {
+	case typebot_model.SessionOpened, typebot_model.SessionPaused, typebot_model.SessionClosed:
+	default:
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "status must be opened, paused or closed"})
+		return
+	}
+
+	changed, err := t.typebotRepository.SetSessionStatusByRemoteJid(instance.Id, data.RemoteJid, data.Status)
+	if err != nil {
+		t.loggerWrapper.GetLogger(instance.Id).LogError("[%s] typebot: erro ao mudar status de %s: %v", instance.Id, data.RemoteJid, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 404 quando não havia sessão: quem chama isto costuma ser automação, e
+	// receber 200 sem nada ter acontecido esconderia um JID errado por semanas.
+	if !changed {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"error":     "no session for this contact",
+			"remoteJid": data.RemoteJid,
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"success": true, "remoteJid": data.RemoteJid, "status": data.Status})
 }
 
 // DeleteSession godoc
