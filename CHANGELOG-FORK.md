@@ -12,6 +12,37 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.7.6 — 2026-08-20
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.6`
+**Digest:** `sha256:12bd9a512d9aebd0256775ce5e080eb70da5d79d40beabaf54d8309c04c81321`
+**Commit:** `e14612f`
+
+### Renomear instância
+
+```
+PUT /instance/name/:instanceId   { "name": "novo nome" }
+```
+
+Troca o rótulo da instância sem recriá-la. Autenticação pela Global API Key
+(mesmo grupo do create/delete). Nome já usado por outra instância é rejeitado;
+renomear para o próprio nome atual é aceito.
+
+O `id` e o `token` não mudam — nenhuma integração precisa ser reconfigurada. O
+runtime é sincronizado na hora, então os webhooks passam a enviar o
+`instanceName` novo imediatamente, sem reconectar.
+
+**Atenção:** automações que filtram eventos pelo campo `instanceName` do payload
+passam a receber o nome novo após o rename. Quem filtra por `instanceId` ou
+token não é afetado.
+
+### Manager
+
+O campo "Nome da Instância" na página de configurações virou um input editável —
+o botão Salvar aparece quando o valor difere do atual.
+
+---
+
 ## 0.7.5 — 2026-08-06
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.5`
