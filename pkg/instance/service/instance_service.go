@@ -35,6 +35,7 @@ type InstanceService interface {
 	Pair(data *PairStruct, instance *instance_model.Instance) (*PairReturnStruct, error)
 	GetAll() ([]*instance_model.Instance, error)
 	Info(instanceId string) (*instance_model.Instance, error)
+	Rename(instanceId string, name string) (*instance_model.Instance, error)
 	Delete(id string) error
 	SetProxy(id string, proxyConfig *ProxyConfig) error
 	SetProxyFromStruct(id string, data *SetProxyStruct) error
@@ -119,6 +120,10 @@ type SetProxyStruct struct {
 
 type ForceReconnectStruct struct {
 	Number string `json:"number"`
+}
+
+type RenameStruct struct {
+	Name string `json:"name"`
 }
 
 func (i *instances) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
@@ -598,6 +603,34 @@ func (i instances) Info(instanceId string) (*instance_model.Instance, error) {
 		instance.Connected = client.IsLoggedIn()
 	} else {
 		instance.Connected = false
+	}
+
+	instance.Proxy = ""
+
+	return instance, nil
+}
+
+// Rename troca o rótulo da instância. Id e token não mudam, mas o nome sai como
+// "instanceName" nos payloads de webhook — por isso o runtime é sincronizado,
+// para os próximos eventos já carregarem o nome novo sem reconectar.
+func (i instances) Rename(instanceId string, name string) (*instance_model.Instance, error) {
+	instance, err := i.instanceRepository.GetInstanceByID(instanceId)
+	if err != nil {
+		return nil, err
+	}
+
+	if existing, _ := i.instanceRepository.GetInstanceByName(name); existing != nil && existing.Id != instance.Id {
+		return nil, fmt.Errorf("an instance with this name already exists")
+	}
+
+	if err := i.instanceRepository.UpdateName(instance.Id, name); err != nil {
+		return nil, err
+	}
+	instance.Name = name
+
+	if err := i.whatsmeowService.UpdateInstanceSettings(instance.Id); err != nil {
+		// Instância desconectada não tem runtime para atualizar; não falha a operação.
+		i.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Error syncing renamed instance to runtime: %v", instance.Id, err)
 	}
 
 	instance.Proxy = ""

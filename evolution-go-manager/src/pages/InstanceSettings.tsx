@@ -50,6 +50,8 @@ export default function InstanceSettings() {
   const navigate = useNavigate();
   const [instance, setInstance] = useState<Instance | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [nameValue, setNameValue] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showToken, setShowToken] = useState(false);
@@ -98,6 +100,8 @@ export default function InstanceSettings() {
   // Populate forms when instance data is loaded (only once)
   useEffect(() => {
     if (!instance || isInitialized.current) return;
+
+    setNameValue(instance.instanceName);
 
     // Populate webhook form
     resetWebhook({
@@ -209,6 +213,38 @@ export default function InstanceSettings() {
       );
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRename = async () => {
+    if (!instance?.id) {
+      toast.error("ID da instância não encontrado");
+      return;
+    }
+
+    const newName = nameValue.trim();
+    if (!newName || newName === instance.instanceName) return;
+
+    try {
+      setIsSavingName(true);
+      const updated = await instancesApi.renameInstance(instance.id, newName);
+      setInstance((prev) =>
+        prev
+          ? {
+              ...prev,
+              instanceName: updated.instanceName,
+              profileName: updated.profileName,
+            }
+          : updated
+      );
+      setNameValue(updated.instanceName);
+      toast.success("Nome da instância atualizado!");
+    } catch (error) {
+      console.error("Erro ao renomear instância:", error);
+      const message = (error as { message?: string })?.message;
+      toast.error(message || "Erro ao renomear instância");
+    } finally {
+      setIsSavingName(false);
     }
   };
 
@@ -326,12 +362,33 @@ export default function InstanceSettings() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-medium text-foreground">
+                  <label
+                    htmlFor="instanceName"
+                    className="text-sm font-medium text-foreground"
+                  >
                     Nome da Instância
                   </label>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {instance.instanceName}
-                  </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      id="instanceName"
+                      type="text"
+                      value={nameValue}
+                      onChange={(e) => setNameValue(e.target.value)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    {nameValue.trim() !== instance.instanceName && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={isSavingName || !nameValue.trim()}
+                        onClick={handleRename}
+                        className="gap-1 flex-shrink-0"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        {isSavingName ? "Salvando..." : "Salvar"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-foreground">

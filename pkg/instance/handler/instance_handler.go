@@ -2,6 +2,7 @@ package instance_handler
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +24,7 @@ type InstanceHandler interface {
 	Qr(ctx *gin.Context)
 	All(ctx *gin.Context)
 	Info(ctx *gin.Context)
+	Rename(ctx *gin.Context)
 	Pair(ctx *gin.Context)
 	SetProxy(ctx *gin.Context)
 	DeleteProxy(ctx *gin.Context)
@@ -369,6 +371,48 @@ func (i *instanceHandler) Info(ctx *gin.Context) {
 	}
 
 	instance, err := i.instanceService.Info(instanceId)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "success", "data": instance})
+}
+
+// Rename instance
+// @Summary Rename instance
+// @Description Updates the instance display name (id and token stay the same)
+// @Tags Instance
+// @Accept json
+// @Produce json
+// @Param instanceId path string true "Instance Id"
+// @Param instance body instance_service.RenameStruct true "New instance name"
+// @Success 200 {object} gin.H "Instance renamed successfully"
+// @Failure 400 {object} gin.H "Error on validation"
+// @Failure 500 {object} gin.H "Internal server error"
+// @Router /instance/name/{instanceId} [put]
+func (i *instanceHandler) Rename(ctx *gin.Context) {
+	instanceId := ctx.Param("instanceId")
+
+	if instanceId == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "instanceId is required"})
+		return
+	}
+
+	var data *instance_service.RenameStruct
+	err := ctx.ShouldBindBodyWithJSON(&data)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	name := strings.TrimSpace(data.Name)
+	if name == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+
+	instance, err := i.instanceService.Rename(instanceId, name)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

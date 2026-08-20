@@ -26,6 +26,7 @@ type InstanceRepository interface {
 	UpdateQrcode(userId string, qr string) error
 	UpdateProxy(userId string, proxy string) error
 	UpdateJid(userId string, jid string) error
+	UpdateName(instanceId string, name string) error
 	UpdateConnectSettings(instanceId string, updates map[string]interface{}) error
 	GetAllConnectedInstances() ([]*instance_model.Instance, error)
 	GetAllConnectedInstancesByClientName(clientName string) ([]*instance_model.Instance, error)
@@ -115,6 +116,13 @@ func (i *instanceRepository) UpdateProxy(userId string, proxy string) error {
 
 func (i *instanceRepository) UpdateJid(userId string, jid string) error {
 	return i.db.Model(&instance_model.Instance{}).Where("id = ?", userId).Update("jid", jid).Error
+}
+
+func (i *instanceRepository) UpdateName(instanceId string, name string) error {
+	if _, err := uuid.Parse(instanceId); err != nil {
+		return fmt.Errorf("invalid UUID format: %v", err)
+	}
+	return i.db.Model(&instance_model.Instance{}).Where("id = ?", instanceId).Update("name", name).Error
 }
 
 // [Athene/PR#136] Update parcial dos campos de conexão (só as colunas informadas).
