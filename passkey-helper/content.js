@@ -78,6 +78,12 @@
     var json = await res.json().catch(function () {
       return null;
     });
+    // O servidor apaga a cerimonia ao concluir o pareamento (ou ao iniciar um
+    // novo ciclo) e passa a responder 404. Depois de iniciada, isso encerra o
+    // fluxo; antes, e um token invalido ou expirado.
+    if (res.status === 404 && started) {
+      return { stage: "" };
+    }
     if (!res.ok) {
       throw new Error((json && json.error) || "Falha ao consultar o status (HTTP " + res.status + ").");
     }
@@ -441,11 +447,13 @@
       case "":
       default:
         if (started) {
-          // Estado limpo apos ter iniciado = pareamento concluido (PairSuccess)
+          // Cerimonia encerrada apos ter iniciada: em geral o pareamento foi
+          // concluido, mas o servidor tambem a encerra ao iniciar um novo QR.
+          // A confirmacao de fato e o status da instancia no Evolution.
           hideButton();
           showCode("");
-          setDesc("Pareamento concluido com sucesso!");
-          setStatus("Pode voltar ao Evolution. Esta aba ja pode ser fechada.", "success");
+          setDesc("Cerimonia de chave de acesso encerrada.");
+          setStatus("Volte ao Evolution para conferir a conexao. Esta aba ja pode ser fechada.", "success");
           clearCeremony();
           stopPolling();
         } else {

@@ -50,7 +50,7 @@ func TestBuildQuotedMessage(t *testing.T) {
 			if err := json.Unmarshal([]byte(tt.body), &q); err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
-			msg := buildQuotedMessage(q)
+			msg, _ := buildQuotedMessage(q)
 			if tt.wantImageCap != "" {
 				if got := msg.GetImageMessage().GetCaption(); got != tt.wantImageCap {
 					t.Fatalf("image caption = %q, want %q", got, tt.wantImageCap)

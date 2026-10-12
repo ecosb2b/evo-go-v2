@@ -41,13 +41,17 @@ func (q QuotedStruct) normalized() QuotedStruct {
 }
 
 // buildQuotedMessage monta o QuotedMessage do ContextInfo a partir do que o
-// cliente enviou. Sem conteúdo, mantém o card vazio de antes.
-func buildQuotedMessage(q QuotedStruct) *waE2E.Message {
+// cliente enviou. Sem conteúdo, mantém o card vazio de antes. Se quoted.message
+// não decodificar, usa quoted.text e devolve o erro para log: tipos com
+// campos oneof (botões, interativos, carrossel) não passam por encoding/json.
+func buildQuotedMessage(q QuotedStruct) (*waE2E.Message, error) {
 	if len(q.Message) > 0 {
 		var msg waE2E.Message
-		if err := json.Unmarshal(q.Message, &msg); err == nil {
-			return &msg
+		err := json.Unmarshal(q.Message, &msg)
+		if err == nil {
+			return &msg, nil
 		}
+		return &waE2E.Message{Conversation: proto.String(q.Text)}, err
 	}
-	return &waE2E.Message{Conversation: proto.String(q.Text)}
+	return &waE2E.Message{Conversation: proto.String(q.Text)}, nil
 }

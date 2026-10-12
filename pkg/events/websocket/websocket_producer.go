@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
 	"github.com/gomessguii/logger"
@@ -27,9 +28,14 @@ type wsConn struct {
 	writeMu sync.Mutex
 }
 
+// wsWriteTimeout limita quanto um cliente que parou de ler segura a entrega:
+// sem prazo, o write bloqueava a goroutine do evento indefinidamente.
+const wsWriteTimeout = 10 * time.Second
+
 func (w *wsConn) writeJSON(v any) error {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
+	_ = w.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 	return w.conn.WriteJSON(v)
 }
 
@@ -181,6 +187,10 @@ func (p *websocketProducer) Produce(queueName string, payload []byte, instanceID
 			p.broadcast = withoutConn(p.broadcast, conn)
 		}
 		p.clientsMux.Unlock()
+		// Fechar encerra também o loop de leitura dessas conexões.
+		for _, conn := range append(deadInstance, deadBroadcast...) {
+			_ = conn.Close()
+		}
 	}
 
 	return firstErr

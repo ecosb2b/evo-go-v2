@@ -360,6 +360,10 @@ type CarouselStruct struct {
 	FormatJid *bool `json:"formatJid,omitempty"`
 	// Quoted (reply-to) context.
 	Quoted QuotedStruct `json:"quoted,omitempty"`
+	// Mention every group participant (groups only).
+	MentionAll bool `json:"mentionAll,omitempty"`
+	// JIDs mentioned in the message.
+	MentionedJID []string `json:"mentionedJid,omitempty"`
 	// Cards displayed in order. At least one card is required.
 	Cards []CarouselCardStruct `json:"cards"`
 }
@@ -2318,7 +2322,10 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 
 	data.Quoted = data.Quoted.normalized()
 	// Conteúdo da mensagem citada, usado em todo ContextInfo de resposta.
-	quotedMessage := buildQuotedMessage(data.Quoted)
+	quotedMessage, quotedErr := buildQuotedMessage(data.Quoted)
+	if quotedErr != nil {
+		s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] quoted.message could not be decoded, using quoted.text: %v", instance.Id, quotedErr)
+	}
 
 	recipient, err := s.validateAndCheckUserExists(data.Number, data.FormatJid, &data.Quoted.MessageID, &data.Quoted.Participant, instance)
 	if err != nil {
@@ -3005,7 +3012,7 @@ func (s *sendService) SendCarousel(data *CarouselStruct, instance *instance_mode
 	data.Quoted = data.Quoted.normalized()
 	if data.Quoted.MessageID != "" {
 		contextInfo.StanzaID = proto.String(data.Quoted.MessageID)
-		contextInfo.QuotedMessage = buildQuotedMessage(data.Quoted)
+		contextInfo.QuotedMessage, _ = buildQuotedMessage(data.Quoted)
 		if data.Quoted.Participant != "" {
 			participantJID, ok := utils.ParseJID(data.Quoted.Participant)
 			if ok {
@@ -3026,8 +3033,12 @@ func (s *sendService) SendCarousel(data *CarouselStruct, instance *instance_mode
 	}
 
 	message, err := s.SendMessage(instance, msg, "InteractiveMessage", &SendDataStruct{
-		Number: data.Number,
-		Delay:  data.Delay,
+		Number:       data.Number,
+		Delay:        data.Delay,
+		FormatJid:    data.FormatJid,
+		MentionAll:   data.MentionAll,
+		MentionedJID: data.MentionedJID,
+		// Quoted fica de fora: o carrossel já monta o próprio ContextInfo.
 	})
 
 	if err != nil {

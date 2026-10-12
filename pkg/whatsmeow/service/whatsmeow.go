@@ -2150,8 +2150,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		doWebhook = true
 		postMap["event"] = "Disconnected"
 
-		// A cerimônia de passkey pertence a este socket. Erro (não Clear): a
-		// extensão lê cerimônia apagada como pareamento concluído. (#107)
+		// A cerimônia de passkey pertence a este socket. Erro em vez de Clear:
+		// a extensão mostra a falha e pede um novo QR, em vez de encerrar o
+		// fluxo como se o pareamento tivesse terminado. (#107)
 		if mycli.WAClient.Store.ID == nil && mycli.passkeyCeremony != nil && mycli.passkeyCeremony.HasActiveByInstance(mycli.userID) {
 			mycli.passkeyCeremony.SetError(mycli.userID, "connection lost during passkey pairing; request a new QR code")
 		}
