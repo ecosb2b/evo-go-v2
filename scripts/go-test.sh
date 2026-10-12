@@ -7,6 +7,7 @@
 # execuções.
 #
 # Uso:  scripts/go-test.sh [args do go test]   (padrão: ./pkg/...)
+#       scripts/go-test.sh build ./...          (roda go build/vet em vez de test)
 #       scripts/go-test.sh -race ./pkg/whatsmeow/service/ -run TestRuntime
 set -euo pipefail
 
@@ -20,6 +21,11 @@ if command -v cygpath >/dev/null 2>&1; then
 	export MSYS_NO_PATHCONV=1
 fi
 
+GO_SUBCMD=test
+case "${1:-}" in
+build | vet) GO_SUBCMD="$1"; shift ;;
+esac
+
 if [ "$#" -eq 0 ]; then
 	set -- ./pkg/...
 fi
@@ -30,5 +36,6 @@ docker run --rm \
 	-v evogo-gocache:/root/.cache/go-build \
 	-w /src \
 	-e CGO_ENABLED=1 \
+	-e GO_SUBCMD="$GO_SUBCMD" \
 	"$GO_IMAGE" \
-	sh -c 'apk add --no-cache build-base libjpeg-turbo-dev libwebp-dev git >/dev/null && go test "$@"' -- "$@"
+	sh -c 'apk add --no-cache build-base libjpeg-turbo-dev libwebp-dev git >/dev/null && go "$GO_SUBCMD" "$@"' -- "$@"
