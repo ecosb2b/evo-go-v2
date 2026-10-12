@@ -579,6 +579,12 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 	if client.Store.ID != nil {
 		w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Already logged in with JID: %s", cd.Instance.Id, client.Store.ID.String())
+		// Sessão pareada que não conectou (rede, WhatsApp fora) não pode
+		// ficar parada até alguém agir: o supervisor tenta de novo com backoff.
+		// Agendado antes de sair; a reconexão espera este runtime terminar.
+		connectFailed := func() {
+			w.ScheduleReconnect(cd.Instance.Id)
+		}
 		err = client.Connect()
 		if err != nil {
 			if strings.Contains(err.Error(), "EOF") {
@@ -587,6 +593,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 				err = client.Connect()
 				if err != nil {
 					w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Falha na segunda tentativa de conexão: %v", cd.Instance.Id, err)
+					connectFailed()
 					return
 				}
 			} else if strings.Contains(err.Error(), "username/password authentication failed") {
@@ -599,11 +606,13 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 				err = client.Connect()
 				if err != nil {
 					w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Failed to connect even without proxy: %v", cd.Instance.Id, err)
+					connectFailed()
 					return
 				}
 				w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Successfully connected without proxy", cd.Instance.Id)
 			} else {
 				w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Failed to connect: %v", cd.Instance.Id, err)
+				connectFailed()
 				return
 			}
 		}

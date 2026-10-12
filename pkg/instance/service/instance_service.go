@@ -293,7 +293,23 @@ func (i instances) Connect(data *ConnectStruct, instance *instance_model.Instanc
 
 		go i.whatsmeowService.StartClient(clientData)
 	} else {
-		i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Instance already running, settings updated without restarting client", instance.Id)
+		whatsmeow_service.ClientMapsMu.RLock()
+		client := i.clientPointer[instance.Id]
+		whatsmeow_service.ClientMapsMu.RUnlock()
+
+		// Runtime registrado com o socket morto (ex.: após stream:error):
+		// antes o /connect só atualizava settings e virava no-op. Uma sessão
+		// pareada é reiniciada; o QR em andamento de uma não pareada fica.
+		if client != nil && !client.IsConnected() && client.Store != nil && client.Store.ID != nil {
+			i.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Instance registered but disconnected, restarting runtime", instance.Id)
+			go func() {
+				if err := i.whatsmeowService.ReconnectClient(instance.Id); err != nil {
+					i.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Restart from /connect failed: %v", instance.Id, err)
+				}
+			}()
+		} else {
+			i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Instance already running, settings updated without restarting client", instance.Id)
+		}
 	}
 
 	// logger.LogInfo("Waiting 1 seconds")
@@ -444,6 +460,13 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 			logger.LogInfo("[%s] No client found, starting new instance for QR code", instance.Id)
 		} else {
 			logger.LogInfo("[%s] Client exists but not connected/logged, restarting for QR code", instance.Id)
+			// O runtime antigo continua reservado mesmo com o socket morto, e o
+			// StartInstance abaixo viraria no-op ("already running") até o
+			// timer de QR derrubá-lo. Para ele primeiro.
+			if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+				logger.LogError("[%s] Failed to stop stale runtime: %v", instance.Id, err)
+				return nil, fmt.Errorf("failed to stop stale runtime: %w", err)
+			}
 		}
 
 		// Iniciar nova instância para gerar QR code

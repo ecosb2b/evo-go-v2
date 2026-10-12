@@ -1,9 +1,14 @@
 package whatsmeow_service
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
+
+	"gorm.io/gorm"
+
+	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 )
 
 const (
@@ -166,9 +171,74 @@ func (w *whatsmeowService) runtimeConnected(instanceID string) bool {
 	return client != nil && client.IsConnected() && client.IsLoggedIn()
 }
 
-func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
+type reconnectDecision int
+
+const (
+	reconnectProceed reconnectDecision = iota
+	// reconnectStop: religar não faz sentido (nunca pareada, desligada pela
+	// API, sessão apagada por logout ou instância removida).
+	reconnectStop
+	// reconnectRetryLater: não deu para decidir (banco indisponível); tenta
+	// de novo com o mesmo backoff em vez de abandonar a instância.
+	reconnectRetryLater
+)
+
+func (d reconnectDecision) String() string {
+	switch d {
+	case reconnectProceed:
+		return "proceed"
+	case reconnectStop:
+		return "stop"
+	default:
+		return "retry-later"
+	}
+}
+
+// decideReconnect decide se o supervisor deve religar a instância. hasDevice
+// só é consultado quando o resto permite religar.
+func decideReconnect(instance *instance_model.Instance, lookupErr error, hasDevice func() (bool, error)) reconnectDecision {
+	if lookupErr != nil {
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return reconnectStop
+		}
+		return reconnectRetryLater
+	}
+	if instance == nil || instance.Jid == "" {
+		return reconnectStop
+	}
+	switch instance.DisconnectReason {
+	case instance_model.DisconnectReasonByAPI, instance_model.DisconnectReasonLogoutByAPI:
+		return reconnectStop
+	}
+	// Logout pelo celular apaga o device e mantém o jid. Religar criaria um
+	// device novo e geraria QR a cada tentativa, para sempre.
+	paired, err := hasDevice()
+	if err != nil {
+		return reconnectRetryLater
+	}
+	if !paired {
+		return reconnectStop
+	}
+	return reconnectProceed
+}
+
+func (w *whatsmeowService) reconnectDecision(instanceID string) reconnectDecision {
 	instance, err := w.instanceRepository.GetInstanceByID(instanceID)
-	if err != nil || instance.Jid == "" {
+	return decideReconnect(instance, err, func() (bool, error) {
+		return w.hasDeviceStore(instance.Jid)
+	})
+}
+
+// abandonReconnect descarta o estado de reconexão sem contar como sucesso.
+func (w *whatsmeowService) abandonReconnect(instanceID string) {
+	w.reconnectMu.Lock()
+	defer w.reconnectMu.Unlock()
+	delete(w.reconnects, instanceID)
+}
+
+func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
+	if decision := w.reconnectDecision(instanceID); decision == reconnectStop {
+		w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Reconnection not scheduled: instance should stay down", instanceID)
 		return
 	}
 	failures, ok := w.beginReconnect(instanceID)
@@ -182,6 +252,20 @@ func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		<-timer.C
+
+		// Reavalia depois da espera: um /instance/disconnect ou um logout pelo
+		// celular nesse intervalo não pode ser desfeito pela reconexão.
+		switch decision := w.reconnectDecision(instanceID); decision {
+		case reconnectStop:
+			w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Reconnection cancelled: instance should stay down", instanceID)
+			w.abandonReconnect(instanceID)
+			return
+		case reconnectRetryLater:
+			w.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] Reconnection postponed: could not read instance state", instanceID)
+			w.finishReconnect(instanceID, false)
+			w.ScheduleReconnect(instanceID)
+			return
+		}
 
 		err := w.restartInstance(instanceID)
 		connected := false

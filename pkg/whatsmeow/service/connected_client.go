@@ -63,10 +63,24 @@ func (w *whatsmeowService) clientSession(instanceID string) (*whatsmeow.Client, 
 // mas reconectando, espera até sessionWait; se não há sessão, falha na hora.
 func (w *whatsmeowService) ConnectedClient(instanceID string) (*whatsmeow.Client, error) {
 	var client *whatsmeow.Client
+	reviving := false
 	ready := awaitSession(func() sessionState {
 		var state sessionState
 		client, state = w.clientSession(instanceID)
-		return state
+		if state != sessionAbsent || client != nil {
+			return state
+		}
+		// Sem runtime: instância pareada cujo start falhou ou que está entre
+		// o stop e o start de uma reconexão. Se ela deve estar no ar, pede a
+		// reconexão ao supervisor (deduplicada) e espera em vez de falhar.
+		if !reviving {
+			if w.reconnectDecision(instanceID) == reconnectStop {
+				return sessionAbsent
+			}
+			w.ScheduleReconnect(instanceID)
+			reviving = true
+		}
+		return sessionReconnecting
 	}, sessionWait, 250*time.Millisecond)
 	if !ready {
 		return nil, ErrInstanceNotConnected
