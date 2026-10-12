@@ -472,25 +472,11 @@ func (s *sendService) validateAndCheckUserExists(phone string, formatJid *bool, 
 		return types.NewJID("", types.DefaultUserServer), fmt.Errorf("failed to connect client: %w", err)
 	}
 
-	// Use CheckUser approach: formatJid=false by default
-	formatJidForCheck := false
-
-	// First attempt with formatJid=false
-	remoteJID, found, err := s.checkSingleUserExists(client, phone, formatJidForCheck, instance.Id)
+	remoteJID, found, err := s.lookupRegisteredJID(client, phone)
 	if err != nil {
 		s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Failed to check user existence: %v", instance.Id, err)
 		// Continue with sending even if check fails (network issues, etc.)
 		return validateMessageFields(phone, formatJid, messageID, participant)
-	}
-
-	// If not found with formatJid=false, try with formatJid=true as fallback
-	if !found {
-		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] User not found with formatJid=false, trying with formatJid=true", instance.Id)
-		remoteJIDRetry, foundRetry, errRetry := s.checkSingleUserExists(client, phone, true, instance.Id)
-		if errRetry == nil && foundRetry {
-			remoteJID = remoteJIDRetry
-			found = foundRetry
-		}
 	}
 
 	if !found {
@@ -501,36 +487,49 @@ func (s *sendService) validateAndCheckUserExists(phone string, formatJid *bool, 
 
 	// Validate the remoteJID with formatJid=false for message sending
 	formatJidFalse := false
-	return validateMessageFields(remoteJID, &formatJidFalse, messageID, participant)
+	return validateMessageFields(remoteJID.String(), &formatJidFalse, messageID, participant)
 }
 
-// checkSingleUserExists checks if a single user exists on WhatsApp with the specified formatJid setting
-// Returns: remoteJID, found, error
-func (s *sendService) checkSingleUserExists(client *whatsmeow.Client, phone string, formatJid bool, instanceId string) (string, bool, error) {
-	phoneNumbers, err := utils.PrepareNumbersForWhatsAppCheck([]string{phone}, &formatJid)
+// lookupRegisteredJID consulta o WhatsApp, numa única chamada, todas as formas
+// em que o número pode estar registrado (celular BR com e sem o 9) e devolve o
+// JID canônico da que existe.
+func (s *sendService) lookupRegisteredJID(client *whatsmeow.Client, phone string) (types.JID, bool, error) {
+	candidates := utils.WhatsAppNumberCandidates(phone)
+	if len(candidates) == 0 {
+		return types.JID{}, false, fmt.Errorf("number %q has no digits", phone)
+	}
+
+	resp, err := client.IsOnWhatsApp(context.Background(), candidates)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to prepare number for WhatsApp check: %v", err)
+		return types.JID{}, false, fmt.Errorf("failed to check if number %s exists on WhatsApp: %w", phone, err)
 	}
 
-	// Check if the number exists on WhatsApp
-	resp, err := client.IsOnWhatsApp(context.Background(), phoneNumbers)
-	if err != nil {
-		return "", false, fmt.Errorf("failed to check if number %s exists on WhatsApp: %v", phoneNumbers[0], err)
-	}
+	jid, found := pickRegisteredJID(candidates, resp)
+	return jid, found, nil
+}
 
-	// Verify if the number was found
-	if len(resp) == 0 {
-		return "", false, fmt.Errorf("number %s not found in WhatsApp response", phoneNumbers[0])
+// pickRegisteredJID escolhe o primeiro candidato registrado, na ordem dos
+// candidatos e não na ordem da resposta.
+func pickRegisteredJID(candidates []string, resp []types.IsOnWhatsAppResponse) (types.JID, bool) {
+	for _, candidate := range candidates {
+		for _, r := range resp {
+			if r.Query == candidate && r.IsIn {
+				return r.JID, true
+			}
+		}
 	}
-
-	// Check if the first result indicates the number is on WhatsApp
-	if !resp[0].IsIn {
-		return "", false, nil // Not an error, just not found
+	// Sem eco da consulta não dá para ordenar; só é seguro aceitar se houver
+	// uma única forma registrada.
+	var registered []types.JID
+	for _, r := range resp {
+		if r.IsIn {
+			registered = append(registered, r.JID)
+		}
 	}
-
-	// Return the remoteJID from WhatsApp's response
-	remoteJID := fmt.Sprintf("%v", resp[0].JID)
-	return remoteJID, true, nil
+	if len(registered) == 1 {
+		return registered[0], true
+	}
+	return types.JID{}, false
 }
 
 func findURL(text string) string {
