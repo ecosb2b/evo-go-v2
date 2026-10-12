@@ -117,6 +117,9 @@ type MediaStruct struct {
 	FormatJid       *bool        `json:"formatJid,omitempty"`
 	Quoted          QuotedStruct `json:"quoted"`
 	ForwardingScore *uint32      `json:"forwardingScore,omitempty"`
+	// ViewOnce: some depois de aberta uma vez (imagem, vídeo, áudio, PTV;
+	// documento não suporta). [upstream#147]
+	ViewOnce bool `json:"viewOnce"`
 }
 
 type PollStruct struct {
@@ -1115,6 +1118,10 @@ func (s *sendService) sendMediaFileWithRetry(data *MediaStruct, fileData []byte,
 			return nil, errors.New("invalid media type")
 		}
 
+		if data.ViewOnce {
+			applyViewOnce(media)
+		}
+
 		message, err := s.SendMessage(instance, media, mediaType, &SendDataStruct{
 			Id:              data.Id,
 			Number:          data.Number,
@@ -1417,6 +1424,10 @@ func (s *sendService) sendMediaUrlWithRetry(data *MediaStruct, instance *instanc
 		}
 
 		messageStart := time.Now()
+		if data.ViewOnce {
+			applyViewOnce(media)
+		}
+
 		message, err := s.SendMessage(instance, media, mediaType, &SendDataStruct{
 			Id:              data.Id,
 			Number:          data.Number,
