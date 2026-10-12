@@ -16,6 +16,8 @@ func TestGlobalEventGroup(t *testing.T) {
 		"CallOffer":            event_types.CALL,
 		"Disconnected":         event_types.CONNECTION,
 		"OfflineSyncCompleted": event_types.CONNECTION,
+		"StreamReplaced":       event_types.CONNECTION,
+		"ClientOutdated":       event_types.CONNECTION,
 		"LabelEdit":            event_types.LABEL,
 		"PushName":             event_types.CONTACT,
 		"Picture":              event_types.PICTURE,

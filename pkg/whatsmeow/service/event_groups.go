@@ -24,7 +24,8 @@ func globalEventGroup(eventType string) string {
 	case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
 		return event_types.CALL
 	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure",
-		"Disconnected", "KeepAliveTimeout", "KeepAliveRestored", "OfflineSyncCompleted":
+		"Disconnected", "KeepAliveTimeout", "KeepAliveRestored", "OfflineSyncCompleted",
+		"StreamReplaced", "ClientOutdated":
 		return event_types.CONNECTION
 	case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
 		return event_types.LABEL

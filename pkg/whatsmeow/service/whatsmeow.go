@@ -1148,8 +1148,17 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			"stage": "error",
 		}
 	case *events.StreamReplaced:
-		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Received StreamReplaced event", mycli.userID)
-		return
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Session replaced by another connection using the same keys", mycli.userID)
+		mycli.recordDisconnect(instance_model.DisconnectReasonStreamReplaced)
+		doWebhook = true
+		postMap["event"] = "StreamReplaced"
+		postMap["data"] = map[string]interface{}{"reason": instance_model.DisconnectReasonStreamReplaced}
+	case *events.ClientOutdated:
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] WhatsApp rejected the client version (405)", mycli.userID)
+		mycli.recordDisconnect(instance_model.DisconnectReasonClientOutdated)
+		doWebhook = true
+		postMap["event"] = "ClientOutdated"
+		postMap["data"] = map[string]interface{}{"reason": instance_model.DisconnectReasonClientOutdated}
 	case *events.TemporaryBan:
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] User received temporary ban for %s", mycli.userID, evt.Code.String())
 		doWebhook = true
@@ -1178,6 +1187,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 		dataMap["reason"] = evt.Code.String()
 		dataMap["expire"] = evt.Expire
+		until := temporaryBanUntil(time.Now(), evt.Expire)
+		mycli.recordDisconnect(instance_model.TemporaryBanReason(until, evt.Code.String()))
+		dataMap["expiresAt"] = until.Unix()
 
 		postMap["data"] = dataMap
 	case *events.Message:
@@ -2430,7 +2442,7 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored", "OfflineSyncCompleted":
+	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored", "OfflineSyncCompleted", "StreamReplaced", "ClientOutdated":
 		if contains(subscriptions, "CONNECTION") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)

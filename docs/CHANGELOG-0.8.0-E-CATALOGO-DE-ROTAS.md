@@ -96,6 +96,9 @@ Os eventos ficaram mais completos. Nenhum campo existente mudou de nome ou forma
 | `QRTimeout` / `LoggedOut` | Menos disparos | O fim de uma janela de QR sem scan emite só `QRTimeout`; antes também saía um `LoggedOut` enganoso. |
 | `QRCode` | Campo novo | `data.expiresAt` (unix): quando o código vence. Se o WhatsApp trocar a chave durante o pareamento, o código atual é reemitido com a chave nova. |
 | `QRTimeout` | Novo motivo | `data.reason = "QR socket closed before pairing"`: a conexão do QR caiu antes do scan; peça um QR novo. |
+| `StreamReplaced` | Novo | Grupo `CONNECTION`: outro processo conectou com a mesma sessão. A instância não religa sozinha; `disconnect_reason = "Stream replaced by another connection"`. |
+| `ClientOutdated` | Novo | Grupo `CONNECTION`: o WhatsApp recusou a versão do cliente (405). `disconnect_reason = "405: client outdated"`. |
+| `TemporaryBan` | Campo novo e registro | `data.expiresAt` (unix). O ban agora fica em `disconnect_reason` (`"Temporary ban until <data>: <motivo>"`) e a reconexão espera o fim do prazo. |
 
 Variáveis de ambiente (para quem opera o servidor):
 
