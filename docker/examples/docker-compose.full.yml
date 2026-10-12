@@ -64,7 +64,7 @@ services:
       EVENT_IGNORE_STATUS: "true"
 
       # QR Code
-      QRCODE_MAX_COUNT: "5"
+      QRCODE_MAX_COUNT: "7"
 
       # Verificação de Usuário
       CHECK_USER_EXISTS: "true"
