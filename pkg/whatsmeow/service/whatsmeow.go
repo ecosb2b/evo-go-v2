@@ -383,6 +383,13 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 			mycli.markRuntimeStopping()
 		}
 		if client != nil {
+			// Runtime que termina sem pareamento: o QR guardado é de um socket
+			// que deixou de existir e não pode ser servido pelo GET /instance/qr.
+			if client.Store.ID == nil {
+				if err := w.instanceRepository.UpdateQrcode(cd.Instance.Id, ""); err != nil {
+					w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Error clearing stored QR: %v", cd.Instance.Id, err)
+				}
+			}
 			if mycli != nil && mycli.eventHandlerID != 0 {
 				client.RemoveEventHandler(mycli.eventHandlerID)
 			}
@@ -662,6 +669,12 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		// awaiting_confirmation. (#107)
 		if w.passkeyCeremony != nil {
 			w.passkeyCeremony.Clear(cd.Instance.Id)
+		}
+		// Sessão de QR nova: um código que tenha sobrado de um runtime anterior
+		// (ex.: restart do container) não pode ser servido antes do primeiro
+		// código desta sessão chegar.
+		if err := w.instanceRepository.UpdateQrcode(cd.Instance.Id, ""); err != nil {
+			w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Error clearing stored QR: %v", cd.Instance.Id, err)
 		}
 
 		// New-device pairing. We intentionally do NOT use client.GetQRChannel:
