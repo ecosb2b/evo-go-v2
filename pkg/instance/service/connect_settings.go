@@ -1,6 +1,7 @@
 package instance_service
 
 import (
+	"slices"
 	"strings"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
@@ -20,8 +21,10 @@ func applyConnectSettings(instance *instance_model.Instance, data *ConnectStruct
 
 	if len(data.Subscribe) > 0 {
 		var subscribedEvents []string
-		if data.Subscribe[0] == "ALL" {
-			subscribedEvents = append(subscribedEvents, event_types.AllEventTypes...)
+		// ALL fica literal: expandido, o CallWebhook nunca entrava no atalho
+		// de ALL e eventos fora dos grupos conhecidos não chegavam. (#105)
+		if slices.Contains(data.Subscribe, event_types.ALL) {
+			subscribedEvents = []string{event_types.ALL}
 		} else {
 			for _, arg := range data.Subscribe {
 				if !event_types.IsEventType(arg) {
