@@ -8,7 +8,8 @@
  * 1. O manager/CRM abre https://web.whatsapp.com/#wapk=<payload>, onde payload
  *    e um base64url de JSON { t: <token_da_instancia>, b: <url_base_da_api> }.
  * 2. Este content script le o payload, faz polling do status da cerimonia na
- *    API, e quando o desafio (publicKey) esta disponivel executa
+ *    API, e quando o desafio (publicKey) esta disponivel pede a
+ *    webauthn-main.js, que roda no contexto da pagina, o
  *    navigator.credentials.get() (permitido pois roda no origin whatsapp.com).
  * 3. A assertion e enviada de volta para a API; quando o pareamento exige a
  *    confirmacao manual do codigo, um botao de confirmar e exibido.
@@ -23,25 +24,6 @@
 
   var STORAGE_KEY = "__evo_wapk_ceremony__";
   var POLL_INTERVAL_MS = 2000;
-
-  // ---------------------------------------------------------------------------
-  // base64url helpers
-  // ---------------------------------------------------------------------------
-  function b64uToBuf(value) {
-    var b64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
-    while (b64.length % 4) b64 += "=";
-    var bin = atob(b64);
-    var bytes = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes.buffer;
-  }
-
-  function bufToB64u(buf) {
-    var bytes = new Uint8Array(buf);
-    var bin = "";
-    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  }
 
   // ---------------------------------------------------------------------------
   // Ceremony payload (URL hash -> sessionStorage)
@@ -130,40 +112,54 @@
   }
 
   // ---------------------------------------------------------------------------
-  // WebAuthn ceremony
+  // WebAuthn ceremony (executada no MAIN world por webauthn-main.js)
   // ---------------------------------------------------------------------------
-  function buildPublicKeyOptions(pk) {
-    return {
-      challenge: b64uToBuf(pk.challenge),
-      timeout: pk.timeout || 60000,
-      rpId: pk.rpId || "whatsapp.com",
-      allowCredentials: (pk.allowCredentials || []).map(function (c) {
-        return {
-          type: c.type || "public-key",
-          id: b64uToBuf(c.id),
-          transports: c.transports,
-        };
-      }),
-      userVerification: pk.userVerification || "required",
-    };
+  // Do content script isolado o 1Password e outros gerenciadores nao enxergam
+  // o WebAuthn, e o Chrome so oferecia chave fisica (#173). A chamada vai para
+  // a pagina; este script continua com a API, que a CSP da pagina bloquearia.
+  var WEBAUTHN_REQUEST_EVENT = "evo-wapk:webauthn-request";
+  var WEBAUTHN_RESULT_EVENT = "evo-wapk:webauthn-result";
+  var WEBAUTHN_BRIDGE_TIMEOUT_MS = 5 * 60 * 1000;
+
+  function newRequestId() {
+    var bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.prototype.map
+      .call(bytes, function (b) {
+        return ("0" + b.toString(16)).slice(-2);
+      })
+      .join("");
   }
 
-  function toWebAuthnResponse(cred) {
-    var r = cred.response;
-    var body = {
-      id: cred.id,
-      rawId: bufToB64u(cred.rawId),
-      type: cred.type,
-      response: {
-        clientDataJSON: bufToB64u(r.clientDataJSON),
-        authenticatorData: bufToB64u(r.authenticatorData),
-        signature: bufToB64u(r.signature),
-      },
-    };
-    if (r.userHandle && r.userHandle.byteLength) {
-      body.response.userHandle = bufToB64u(r.userHandle);
-    }
-    return body;
+  function requestAssertion(pk) {
+    return new Promise(function (resolve, reject) {
+      var requestId = newRequestId();
+      var timer = setTimeout(function () {
+        window.removeEventListener(WEBAUTHN_RESULT_EVENT, onResult);
+        reject(new Error("Tempo esgotado aguardando a chave de acesso."));
+      }, WEBAUTHN_BRIDGE_TIMEOUT_MS);
+
+      function onResult(event) {
+        var detail;
+        try {
+          detail = JSON.parse(event.detail || "{}");
+        } catch (e) {
+          return;
+        }
+        if (detail.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener(WEBAUTHN_RESULT_EVENT, onResult);
+        if (detail.error) reject(new Error(detail.error));
+        else resolve(detail.result);
+      }
+
+      window.addEventListener(WEBAUTHN_RESULT_EVENT, onResult);
+      window.dispatchEvent(
+        new CustomEvent(WEBAUTHN_REQUEST_EVENT, {
+          detail: JSON.stringify({ requestId: requestId, publicKey: pk }),
+        })
+      );
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -334,10 +330,9 @@
     showCode("");
     setStatus("Aguardando a sua chave de acesso...");
     try {
-      var cred = await navigator.credentials.get({ publicKey: buildPublicKeyOptions(pk) });
-      if (!cred) throw new Error("Autenticacao cancelada.");
+      var assertion = await requestAssertion(pk);
       setStatus("Enviando assinatura...");
-      await sendResponse(cer, toWebAuthnResponse(cred));
+      await sendResponse(cer, assertion);
       hideButton();
       setStatus("Assinatura enviada. Concluindo pareamento...");
     } catch (e) {
