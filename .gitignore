@@ -23,3 +23,6 @@ regen-swagger.sh
 # processos do projeto e ficam versionadas (.claude/skills/).
 .claude/settings.json
 .claude/settings.local.json
+
+# Compose de produção com chaves e senhas (não versionar)
+docker/docker-compose-evo-go.yml
