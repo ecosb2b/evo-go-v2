@@ -2436,7 +2436,7 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
+	case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored", "OfflineSyncCompleted":
 		if contains(subscriptions, "CONNECTION") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
@@ -2471,13 +2471,19 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "QRCode", "QRTimeout", "QRSuccess":
+	case "QRCode", "QRTimeout", "QRSuccess", "PasskeyRequest", "PasskeyConfirmation", "PasskeyError":
 		if contains(subscriptions, "QRCODE") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
 	case "ButtonClick":
 		if contains(subscriptions, "BUTTON_CLICK") || contains(subscriptions, "MESSAGE") {
+			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
+			w.sendToQueueOrWebhook(instance, queueName, jsonData)
+		}
+	case "SendStatus":
+		// Envio de status (/send/status/*) só chegava a quem assinava ALL.
+		if contains(subscriptions, "SEND_MESSAGE") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
@@ -2710,131 +2716,46 @@ func getExtensionFromMimeType(mimeType string) string {
 
 func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, userId string) {
 	defer utils.Recover("SendToGlobalQueues")
-	w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Starting sendToGlobalQueues for event: %s", userId, eventType)
+	logger := w.loggerWrapper.GetLogger(userId)
+	logger.LogInfo("[%s] Starting sendToGlobalQueues for event: %s", userId, eventType)
+
+	group := globalEventGroup(eventType)
 
 	// AMQP: AMQP_SPECIFIC_EVENTS tem prioridade sobre AMQP_GLOBAL_EVENTS
 	if w.config.AmqpGlobalEnabled {
 		var shouldSendToAmqp bool
-		var amqpQueueName string
-
-		// Se AMQP_SPECIFIC_EVENTS estiver configurada, ela tem prioridade
 		if len(w.config.AmqpSpecificEvents) > 0 {
-			w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Using AMQP_SPECIFIC_EVENTS (priority over AMQP_GLOBAL_EVENTS)", userId)
-			// Verifica se o evento específico está na lista
-			if utils.Find(w.config.AmqpSpecificEvents, eventType) {
-				shouldSendToAmqp = true
-				amqpQueueName = strings.ToLower(eventType)
-				w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Event %s found in AMQP_SPECIFIC_EVENTS", userId, eventType)
-			}
+			shouldSendToAmqp = utils.Find(w.config.AmqpSpecificEvents, eventType)
+		} else if group == "" {
+			// Sem grupo, só não vai ao AMQP; o NATS abaixo segue avaliando.
+			logger.LogInfo("[%s] Event %s not mapped to global event type", userId, eventType)
 		} else {
-			// Fallback para AMQP_GLOBAL_EVENTS (modo antigo com grupos de eventos)
-			w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Using AMQP_GLOBAL_EVENTS (fallback mode)", userId)
-
-			// Mapeia o evento do Whatsmeow para o tipo de evento global
-			var globalEventType string
-			switch eventType {
-			case "Message":
-				globalEventType = "MESSAGE"
-			case "SendMessage":
-				globalEventType = "SEND_MESSAGE"
-			case "Receipt":
-				globalEventType = "READ_RECEIPT"
-			case "Presence":
-				globalEventType = "PRESENCE"
-			case "HistorySync":
-				globalEventType = "HISTORY_SYNC"
-			case "ChatPresence", "Archive":
-				globalEventType = "CHAT_PRESENCE"
-			case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
-				globalEventType = "CALL"
-			case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
-				globalEventType = "CONNECTION"
-			case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
-				globalEventType = "LABEL"
-			case "Contact", "PushName":
-				globalEventType = "CONTACT"
-			case "Picture":
-				globalEventType = "PICTURE"
-			case "UserAbout":
-				globalEventType = "USER_ABOUT"
-			case "GroupInfo", "JoinedGroup":
-				globalEventType = "GROUP"
-			case "NewsletterJoin", "NewsletterLeave":
-				globalEventType = "NEWSLETTER"
-			case "QRCode", "QRTimeout", "QRSuccess":
-				globalEventType = "QRCODE"
-			default:
-				w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Event %s not mapped to global event type", userId, eventType)
-				return
-			}
-
-			// Verifica se o grupo de eventos está na lista
-			if utils.Find(w.config.AmqpGlobalEvents, globalEventType) {
-				shouldSendToAmqp = true
-				amqpQueueName = strings.ToLower(eventType)
-				w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Event group %s found in AMQP_GLOBAL_EVENTS", userId, globalEventType)
-			}
+			shouldSendToAmqp = utils.Find(w.config.AmqpGlobalEvents, group)
 		}
 
-		// Envia para RabbitMQ se necessário
 		if shouldSendToAmqp {
-			w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Sending to AMQP queue: %s", userId, amqpQueueName)
-			err := w.rabbitmqProducer.Produce(amqpQueueName, payload, "global", userId)
-			if err != nil {
-				w.loggerWrapper.GetLogger(userId).LogError("[%s] Failed to send message to RabbitMQ global queue %s: %v", userId, amqpQueueName, err)
+			amqpQueueName := strings.ToLower(eventType)
+			logger.LogInfo("[%s] Sending to AMQP queue: %s", userId, amqpQueueName)
+			if err := w.rabbitmqProducer.Produce(amqpQueueName, payload, "global", userId); err != nil {
+				logger.LogError("[%s] Failed to send message to RabbitMQ global queue %s: %v", userId, amqpQueueName, err)
 			} else {
-				w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Successfully sent message to RabbitMQ global queue %s", userId, amqpQueueName)
+				logger.LogInfo("[%s] Successfully sent message to RabbitMQ global queue %s", userId, amqpQueueName)
 			}
 		} else {
-			w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Event %s not configured for AMQP", userId, eventType)
+			logger.LogInfo("[%s] Event %s not configured for AMQP", userId, eventType)
 		}
 	}
 
-	// NATS: Mantém o comportamento original por enquanto (só NATS_GLOBAL_EVENTS)
 	if w.config.NatsGlobalEnabled {
-		// Mapeia o evento para grupo (necessário para NATS por enquanto)
-		var globalEventType string
-		switch eventType {
-		case "Message":
-			globalEventType = "MESSAGE"
-		case "SendMessage":
-			globalEventType = "SEND_MESSAGE"
-		case "Receipt":
-			globalEventType = "READ_RECEIPT"
-		case "Presence":
-			globalEventType = "PRESENCE"
-		case "HistorySync":
-			globalEventType = "HISTORY_SYNC"
-		case "ChatPresence", "Archive":
-			globalEventType = "CHAT_PRESENCE"
-		case "CallOffer", "CallAccept", "CallTerminate", "CallOfferNotice", "CallRelayLatency":
-			globalEventType = "CALL"
-		case "Connected", "PairSuccess", "TemporaryBan", "LoggedOut", "ConnectFailure", "Disconnected", "KeepAliveTimeout", "KeepAliveRestored":
-			globalEventType = "CONNECTION"
-		case "LabelEdit", "LabelAssociationChat", "LabelAssociationMessage":
-			globalEventType = "LABEL"
-		case "Contact", "PushName":
-			globalEventType = "CONTACT"
-		case "GroupInfo", "JoinedGroup":
-			globalEventType = "GROUP"
-		case "NewsletterJoin", "NewsletterLeave":
-			globalEventType = "NEWSLETTER"
-		case "QRCode", "QRTimeout", "QRSuccess":
-			globalEventType = "QRCODE"
-		default:
-			globalEventType = ""
-		}
-
-		// Verifica se o evento está na lista de eventos globais NATS
-		if globalEventType != "" && utils.Find(w.config.NatsGlobalEvents, globalEventType) {
+		if group == "" {
+			logger.LogInfo("[%s] Event %s not mapped to a NATS global event type", userId, eventType)
+		} else if utils.Find(w.config.NatsGlobalEvents, group) {
 			queueName := strings.ToLower(eventType)
-			w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Sending to NATS subject: %s", userId, queueName)
-
-			err := w.natsProducer.Produce(queueName, payload, "global", userId)
-			if err != nil {
-				w.loggerWrapper.GetLogger(userId).LogError("[%s] Failed to send message to NATS global subject %s: %v", userId, queueName, err)
+			logger.LogInfo("[%s] Sending to NATS subject: %s", userId, queueName)
+			if err := w.natsProducer.Produce(queueName, payload, "global", userId); err != nil {
+				logger.LogError("[%s] Failed to send message to NATS global subject %s: %v", userId, queueName, err)
 			} else {
-				w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Successfully sent message to NATS global subject %s", userId, queueName)
+				logger.LogInfo("[%s] Successfully sent message to NATS global subject %s", userId, queueName)
 			}
 		}
 	}
