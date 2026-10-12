@@ -2180,6 +2180,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// O match exato (== 3) evita empilhar restarts com 4, 5, ... enquanto um
 		// já está em andamento.
 		if evt.ErrorCount == 3 {
+			// Regrava o motivo: um "Stream replaced" antigo faria o supervisor
+			// recusar a reconexão.
+			mycli.recordDisconnect(instance_model.DisconnectReasonKeepAliveTimeout)
 			mycli.service.ScheduleReconnect(mycli.userID)
 		}
 	case *events.KeepAliveRestored:
@@ -2256,7 +2259,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		} else if strings.HasPrefix(evt.Info.ID, "66") || strings.HasPrefix(evt.Info.ID, "67") {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] ID 66 or 67 found, reconnecting client", mycli.userID)
 			// A reconexão é do supervisor: Disconnect/Connect direto aqui criava
-			// um socket fora do token de runtime.
+			// um socket fora do token de runtime. O motivo é regravado para
+			// que um "Stream replaced" antigo não bloqueie a reconexão.
+			mycli.recordDisconnect(instance_model.DisconnectReasonUndecryptable)
 			mycli.service.ScheduleReconnect(mycli.userID)
 		} else {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] ID is not 66 or 67 or view_once, skipping", mycli.userID)
@@ -2657,6 +2662,16 @@ func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 	w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Found %d instances to restore", clientName, len(instances))
 
 	for _, instance := range instances {
+		// Ban temporário ainda valendo: não sobe agora; o supervisor espera o
+		// prazo e religa depois. "Stream replaced" sobe mesmo assim: após um
+		// deploy, o container novo é quem deve ficar com a sessão.
+		if skipAtBoot(instance, time.Now()) {
+			until, _ := instance_model.TemporaryBanUntil(instance.DisconnectReason)
+			w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Skipping '%s' at boot: temporary ban until %s — reconnection scheduled after it", clientName, instance.Id, until.Format(time.RFC3339))
+			w.ScheduleReconnect(instance.Id)
+			continue
+		}
+
 		// Quem caiu sem ninguém pedir só volta se ainda tiver sessão: logout
 		// pelo celular apaga o device mas mantém o jid, e religar geraria QR.
 		if !instance.Connected {

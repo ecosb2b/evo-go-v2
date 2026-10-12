@@ -16,6 +16,13 @@ func banWait(reason string, now time.Time) time.Duration {
 	return until.Sub(now)
 }
 
+// skipAtBoot diz se o boot deve pular a instância: só um ban temporário ainda
+// valendo segura. "Stream replaced" sobe de propósito — depois de um deploy, o
+// container novo é quem deve ficar com a sessão.
+func skipAtBoot(instance *instance_model.Instance, now time.Time) bool {
+	return banWait(instance.DisconnectReason, now) > 0
+}
+
 // pendingBanWait lê o motivo gravado da instância e devolve a espera do ban.
 func (w *whatsmeowService) pendingBanWait(instanceID string) time.Duration {
 	instance, err := w.instanceRepository.GetInstanceByID(instanceID)

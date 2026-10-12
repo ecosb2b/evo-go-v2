@@ -15,6 +15,12 @@ const (
 	DisconnectReasonStreamReplaced = "Stream replaced by another connection"
 	// DisconnectReasonClientOutdated: o WhatsApp recusou a versão do cliente (405).
 	DisconnectReasonClientOutdated = "405: client outdated"
+	// DisconnectReasonKeepAliveTimeout: 3 keepalives seguidos falharam; a
+	// conexão morreu em silêncio e o supervisor religa.
+	DisconnectReasonKeepAliveTimeout = "Keepalive timeout"
+	// DisconnectReasonUndecryptable: chegou mensagem indecifrável com ID 66/67;
+	// o supervisor religa para renegociar as chaves.
+	DisconnectReasonUndecryptable = "Undecryptable message (66/67)"
 
 	temporaryBanPrefix = "Temporary ban until "
 )

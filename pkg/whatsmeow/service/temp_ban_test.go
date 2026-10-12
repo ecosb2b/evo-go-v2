@@ -23,6 +23,27 @@ func TestBanWait(t *testing.T) {
 	}
 }
 
+func TestSkipAtBoot(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	tests := []struct {
+		name   string
+		reason string
+		want   bool
+	}{
+		{"active ban", instance_model.TemporaryBanReason(now.Add(time.Hour), "spam"), true},
+		{"expired ban", instance_model.TemporaryBanReason(now.Add(-time.Minute), "spam"), false},
+		{"stream replaced", instance_model.DisconnectReasonStreamReplaced, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := &instance_model.Instance{Id: "i1", DisconnectReason: tt.reason}
+			if got := skipAtBoot(instance, now); got != tt.want {
+				t.Fatalf("skipAtBoot(%q) = %v, want %v", tt.reason, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTemporaryBanUntilUsesExpiry(t *testing.T) {
 	now := time.Unix(1000, 0)
 	if got := temporaryBanUntil(now, 2*time.Hour); !got.Equal(now.Add(2 * time.Hour)) {

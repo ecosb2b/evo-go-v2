@@ -41,6 +41,8 @@ func TestRequiresQR(t *testing.T) {
 		{"reconnecting", jid, "Reconnecting", false},
 		{"disconnected through the API", jid, DisconnectReasonByAPI, false},
 		{"banned", jid, TemporaryBanReason(time.Now(), "spam"), false},
+		{"keepalive timeout", jid, DisconnectReasonKeepAliveTimeout, false},
+		{"undecryptable 66/67", jid, DisconnectReasonUndecryptable, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
