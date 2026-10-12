@@ -465,6 +465,7 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 
 	// Se não há cliente OU cliente sem sessão logada, iniciar/reiniciar para gerar QR
 	if client == nil || (!client.IsConnected() && !client.IsLoggedIn()) {
+		start := true
 		if client == nil {
 			logger.LogInfo("[%s] No client found, starting new instance for QR code", instance.Id)
 		} else {
@@ -474,33 +475,37 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 				logger.LogInfo("[%s] Paired client is reconnecting — no QR to return", instance.Id)
 				return nil, fmt.Errorf("session already logged in")
 			}
-			logger.LogInfo("[%s] Client exists but not connected/logged, restarting for QR code", instance.Id)
-			// O runtime antigo continua reservado mesmo com o socket morto, e o
-			// StartInstance abaixo viraria no-op ("already running") até o
-			// timer de QR derrubá-lo. Para ele primeiro.
-			if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
-				logger.LogError("[%s] Failed to stop stale runtime: %v", instance.Id, err)
-				return nil, fmt.Errorf("failed to stop stale runtime: %w", err)
+			if age, known := i.whatsmeowService.RuntimeAge(instance.Id); !qrRestartAllowed(age, known) {
+				logger.LogInfo("[%s] Runtime started %s ago and is still connecting — waiting for its QR", instance.Id, age.Round(time.Second))
+				start = false
+			} else {
+				logger.LogInfo("[%s] Client exists but not connected/logged, restarting for QR code", instance.Id)
+				// O runtime antigo continua reservado mesmo com o socket morto, e o
+				// StartInstance abaixo viraria no-op ("already running"). Para ele primeiro.
+				if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+					logger.LogError("[%s] Failed to stop stale runtime: %v", instance.Id, err)
+					return nil, fmt.Errorf("failed to stop stale runtime: %w", err)
+				}
 			}
 		}
 
-		// Iniciar nova instância para gerar QR code
-		err := i.whatsmeowService.StartInstance(instance.Id)
-		if err != nil {
-			logger.LogError("[%s] Failed to start instance: %v", instance.Id, err)
-			return nil, fmt.Errorf("failed to start instance: %w", err)
-		}
+		if start {
+			err := i.whatsmeowService.StartInstance(instance.Id)
+			if err != nil {
+				logger.LogError("[%s] Failed to start instance: %v", instance.Id, err)
+				return nil, fmt.Errorf("failed to start instance: %w", err)
+			}
 
-		// Aguardar um pouco para o cliente iniciar e gerar QR code
-		logger.LogInfo("[%s] Waiting for QR code generation...", instance.Id)
-		time.Sleep(3 * time.Second)
+			// Aguardar um pouco para o cliente iniciar e gerar QR code
+			logger.LogInfo("[%s] Waiting for QR code generation...", instance.Id)
+			time.Sleep(3 * time.Second)
 
-		// Verificar novamente se há cliente
-		whatsmeow_service.ClientMapsMu.RLock()
-		client = i.clientPointer[instance.Id]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		if client != nil && client.IsLoggedIn() {
-			return nil, fmt.Errorf("session already logged in")
+			whatsmeow_service.ClientMapsMu.RLock()
+			client = i.clientPointer[instance.Id]
+			whatsmeow_service.ClientMapsMu.RUnlock()
+			if client != nil && client.IsLoggedIn() {
+				return nil, fmt.Errorf("session already logged in")
+			}
 		}
 	} else if !client.IsConnected() {
 		// Se o cliente existe mas não está conectado, pode estar aguardando QR code
@@ -554,6 +559,15 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 	}
 
 	return qr, nil
+}
+
+// qrConnectGrace: tempo que um runtime recém-criado tem para abrir o socket
+// antes de o GET /qr considerá-lo morto. Sem isso, um GET logo depois do
+// /connect derrubava a sessão que ainda conectava e gerava um aparelho novo.
+const qrConnectGrace = 15 * time.Second
+
+func qrRestartAllowed(age time.Duration, known bool) bool {
+	return !known || age >= qrConnectGrace
 }
 
 // readFreshQR devolve o QR guardado se ele existir e ainda não tiver vencido.

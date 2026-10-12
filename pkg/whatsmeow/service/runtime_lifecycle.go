@@ -26,6 +26,7 @@ type instanceRuntime struct {
 	// restarting: o stop veio de um restart (supervisor), não de logout ou
 	// desconexão; o runtime não deve anunciar LoggedOut ao sair.
 	restarting bool
+	startedAt  time.Time
 }
 
 type reconnectRuntime struct {
@@ -45,7 +46,7 @@ func (w *whatsmeowService) reserveRuntime(instanceID string) (uint64, <-chan str
 	}
 
 	w.runtimeSequence++
-	runtime := &instanceRuntime{token: w.runtimeSequence, done: make(chan struct{})}
+	runtime := &instanceRuntime{token: w.runtimeSequence, done: make(chan struct{}), startedAt: time.Now()}
 	w.runtimes[instanceID] = runtime
 	return runtime.token, runtime.done, true
 }
@@ -69,6 +70,22 @@ func (w *whatsmeowService) runtimeDone(instanceID string) <-chan struct{} {
 		return runtime.done
 	}
 	return nil
+}
+
+// runtimeAge diz há quanto tempo o runtime atual da instância foi reservado.
+func (w *whatsmeowService) runtimeAge(instanceID string) (time.Duration, bool) {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	runtime := w.runtimes[instanceID]
+	if runtime == nil {
+		return 0, false
+	}
+	return time.Since(runtime.startedAt), true
+}
+
+// RuntimeAge expõe runtimeAge ao serviço de instâncias.
+func (w *whatsmeowService) RuntimeAge(instanceID string) (time.Duration, bool) {
+	return w.runtimeAge(instanceID)
 }
 
 func (w *whatsmeowService) signalRuntimeStop(instanceID string) <-chan struct{} {

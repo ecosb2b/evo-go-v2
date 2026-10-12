@@ -154,3 +154,24 @@ func TestUnmarkRuntimeRestart(t *testing.T) {
 		t.Fatal("restart mark still set after unmark")
 	}
 }
+
+func TestRuntimeAgeTracksReservedRuntime(t *testing.T) {
+	service := &whatsmeowService{}
+	if _, known := service.runtimeAge("inst"); known {
+		t.Fatal("age known before any runtime was reserved")
+	}
+
+	token, _, ok := service.reserveRuntime("inst")
+	if !ok {
+		t.Fatal("reserveRuntime failed")
+	}
+	age, known := service.runtimeAge("inst")
+	if !known || age < 0 || age > time.Second {
+		t.Fatalf("age=%s known=%v right after reserve", age, known)
+	}
+
+	service.finishRuntime("inst", token)
+	if _, known := service.runtimeAge("inst"); known {
+		t.Fatal("age still known after the runtime finished")
+	}
+}

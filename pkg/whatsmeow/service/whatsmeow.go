@@ -68,6 +68,9 @@ type WhatsmeowService interface {
 	// ErrInstanceNotConnected, sem iniciar nem reiniciar a instância.
 	ConnectedClient(instanceId string) (*whatsmeow.Client, error)
 	ClearInstanceCache(instanceId string, token string) error
+	// RuntimeAge diz há quanto tempo o runtime da instância subiu (false se
+	// não há runtime). O GET /qr usa para não derrubar um socket que ainda abre.
+	RuntimeAge(instanceId string) (time.Duration, bool)
 	CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte)
 	// SendOperationalEvent publica um evento de operação — hoje só a pausa
 	// automática do Typebot — SEM passar pelo filtro de assinaturas do
