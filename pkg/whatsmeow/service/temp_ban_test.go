@@ -3,7 +3,25 @@ package whatsmeow_service
 import (
 	"testing"
 	"time"
+
+	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 )
+
+func TestBanWait(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	banned := instance_model.TemporaryBanReason(now.Add(90*time.Minute), "spam")
+	expired := instance_model.TemporaryBanReason(now.Add(-time.Minute), "spam")
+
+	if got := banWait(banned, now); got != 90*time.Minute {
+		t.Fatalf("banWait(active) = %s, want 1h30m", got)
+	}
+	if got := banWait(expired, now); got != 0 {
+		t.Fatalf("banWait(expired) = %s, want 0", got)
+	}
+	if got := banWait("Reconnecting", now); got != 0 {
+		t.Fatalf("banWait(not a ban) = %s, want 0", got)
+	}
+}
 
 func TestTemporaryBanUntilUsesExpiry(t *testing.T) {
 	now := time.Unix(1000, 0)

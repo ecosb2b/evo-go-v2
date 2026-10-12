@@ -1191,6 +1191,10 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.recordDisconnect(instance_model.TemporaryBanReason(until, evt.Code.String()))
 		dataMap["expiresAt"] = until.Unix()
 
+		// Ban fora do supervisor (boot, /connect) ninguém reagendava: agenda a
+		// volta para depois do prazo (ScheduleReconnect espera o ban).
+		mycli.service.ScheduleReconnect(mycli.userID)
+
 		postMap["data"] = dataMap
 	case *events.Message:
 		doWebhook = true

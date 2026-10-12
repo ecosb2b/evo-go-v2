@@ -33,6 +33,12 @@ func TestDecideReconnect(t *testing.T) {
 			instance: &instance_model.Instance{Jid: paired.Jid, DisconnectReason: instance_model.DisconnectReasonLogoutByAPI},
 			want:     reconnectStop,
 		},
+		{
+			name:      "session replaced by another process",
+			instance:  &instance_model.Instance{Jid: paired.Jid, DisconnectReason: instance_model.DisconnectReasonStreamReplaced},
+			hasDevice: true,
+			want:      reconnectStop,
+		},
 		{name: "session deleted by a logout from the phone", instance: paired, hasDevice: false, want: reconnectStop},
 		{name: "instance deleted", lookupErr: gorm.ErrRecordNotFound, want: reconnectStop},
 		{name: "database unavailable on lookup", lookupErr: dbDown, want: reconnectRetryLater},

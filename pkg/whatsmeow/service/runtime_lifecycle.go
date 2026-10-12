@@ -268,7 +268,8 @@ func decideReconnect(instance *instance_model.Instance, lookupErr error, hasDevi
 		return reconnectStop
 	}
 	switch instance.DisconnectReason {
-	case instance_model.DisconnectReasonByAPI, instance_model.DisconnectReasonLogoutByAPI:
+	case instance_model.DisconnectReasonByAPI, instance_model.DisconnectReasonLogoutByAPI,
+		instance_model.DisconnectReasonStreamReplaced:
 		return reconnectStop
 	}
 	// Logout pelo celular apaga o device e mantém o jid. Religar criaria um
@@ -310,6 +311,10 @@ func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
 	go func() {
 		defer utils.Recover("ScheduleReconnect")
 		delay := reconnectDelay(failures, rand.Float64())
+		// Ban temporário: tentar antes do prazo só renova o ban.
+		if wait := w.pendingBanWait(instanceID); wait > delay {
+			delay = wait + reconnectDelay(0, rand.Float64())
+		}
 		w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Reconnection scheduled in %s", instanceID, delay)
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
