@@ -12,6 +12,57 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.8.0 — 2026-10-12
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.8.0`
+**Digest:** `sha256:68c7a126c59baf848a142fa2447d402aefcf6dbd6e524e983325cb8ddce9d449`
+**Commit:** `a47a71e`
+
+Sincronização com o upstream e correções do QR "Não foi possível conectar" e das
+desconexões. Lista completa de rotas, campos e eventos para integradores:
+[`docs/CHANGELOG-0.8.0-E-CATALOGO-DE-ROTAS.md`](docs/CHANGELOG-0.8.0-E-CATALOGO-DE-ROTAS.md).
+Diagnóstico das causas: [`docs/DIAGNOSTICO-QR-E-DESCONEXAO.md`](docs/DIAGNOSTICO-QR-E-DESCONEXAO.md).
+
+### QR e pareamento
+
+- A rotina que troca o QR fica presa à sessão que a criou: não serve mais código
+  de uma conexão morta nem derruba a sessão nova quando a antiga termina.
+- O QR é guardado com validade: `GET /instance/qr` traz `expiresAt`/`expiresIn` e
+  nunca devolve código vencido. Logo depois do `/instance/connect`, espera até
+  ~6 s pelo primeiro código.
+- Troca da chave do QR pelo WhatsApp durante o pareamento (`RotateADVSecret`) é
+  tratada: os códigos pendentes são reescritos.
+- `GET /instance/qr` não reinicia mais uma sessão que ainda está abrindo.
+- Janela de pareamento de ~160 s: `QRCODE_MAX_COUNT` passa a ter padrão `7`.
+- Webhook novo `PairError`; o fim de uma janela de QR sem scan não emite mais
+  `LoggedOut`.
+
+### Reconexão
+
+- Ban temporário, sessão substituída e cliente desatualizado ficam registrados em
+  `disconnect_reason` e saem por webhook (`TemporaryBan`, `StreamReplaced`,
+  `ClientOutdated`).
+- O supervisor espera o fim do ban (também no boot) e não briga com uma sessão
+  assumida por outro processo.
+- Verificação a cada 90 s religa instâncias pareadas que ficaram paradas (requer
+  `CONNECT_ON_STARTUP=true`). Depois de 10 falhas seguidas, a espera entre
+  tentativas cresce até 5 min.
+- Campo novo `needsQr` em `/instance/all` e `/instance/info`.
+
+### Atenção ao atualizar
+
+- **`CONNECT_ON_STARTUP=true`** no ambiente: o padrão é `false`, e sem ele nenhuma
+  instância volta sozinha depois de um restart.
+- Remova `QRCODE_MAX_COUNT=5` se estiver fixado.
+- `PASSKEY_PUBLIC_URL` deve ser a URL pública do EvoProxy (a extensão de passkey
+  chama o proxy, que repassa para cá).
+- Os nomes certos das variáveis de log são `DEBUG_ENABLED` e `LOG_TYPE`
+  (`WADEBUG`/`LOGTYPE`, usados em alguns compose, eram ignorados).
+- `/send/*` com a instância desconectada responde `409` na hora (antes `500`
+  depois de até ~80 s).
+
+---
+
 ## 0.7.6 — 2026-08-20
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.7.6`
