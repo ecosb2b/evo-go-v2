@@ -698,6 +698,14 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 				w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Error updating instance: %s", cd.Instance.Id, err)
 			}
 
+			// Restart do supervisor (reconexão, envio, 66/67) não é logout: o
+			// runtime volta em seguida e emite Connected. Anunciar LoggedOut aqui
+			// fazia o cliente achar que a sessão tinha sido desvinculada.
+			if w.runtimeRestarting(cd.Instance.Id) {
+				w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Runtime stopped for restart; LoggedOut not emitted", cd.Instance.Id)
+				return
+			}
+
 			postMap := make(map[string]interface{})
 
 			postMap["event"] = "LoggedOut"

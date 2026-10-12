@@ -110,3 +110,33 @@ func TestReconnectDelayBackoffAndCap(t *testing.T) {
 		t.Fatalf("expected 25%% jitter, got %s", got)
 	}
 }
+
+// Restart do supervisor não pode chegar ao cliente como LoggedOut: o ramo de
+// kill do StartClient consulta esta marca antes de emitir o evento.
+func TestRuntimeRestartMarkIsPerRuntime(t *testing.T) {
+	service := &whatsmeowService{}
+	if service.runtimeRestarting("instance-1") {
+		t.Fatal("unknown instance reported as restarting")
+	}
+
+	token, _, ok := service.reserveRuntime("instance-1")
+	if !ok {
+		t.Fatal("expected runtime reservation")
+	}
+	if service.runtimeRestarting("instance-1") {
+		t.Fatal("fresh runtime reported as restarting")
+	}
+
+	service.markRuntimeRestart("instance-1")
+	if !service.runtimeRestarting("instance-1") {
+		t.Fatal("restart mark not visible")
+	}
+
+	service.finishRuntime("instance-1", token)
+	if _, _, ok := service.reserveRuntime("instance-1"); !ok {
+		t.Fatal("expected a new runtime reservation")
+	}
+	if service.runtimeRestarting("instance-1") {
+		t.Fatal("restart mark leaked into the next runtime")
+	}
+}

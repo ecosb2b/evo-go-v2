@@ -21,6 +21,9 @@ const (
 type instanceRuntime struct {
 	token uint64
 	done  chan struct{}
+	// restarting: o stop veio de um restart (supervisor), não de logout ou
+	// desconexão; o runtime não deve anunciar LoggedOut ao sair.
+	restarting bool
 }
 
 type reconnectRuntime struct {
@@ -79,6 +82,22 @@ func (w *whatsmeowService) signalRuntimeStop(instanceID string) <-chan struct{} 
 		}
 	}
 	return done
+}
+
+// markRuntimeRestart marca o runtime atual como parando para reiniciar.
+func (w *whatsmeowService) markRuntimeRestart(instanceID string) {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if runtime := w.runtimes[instanceID]; runtime != nil {
+		runtime.restarting = true
+	}
+}
+
+func (w *whatsmeowService) runtimeRestarting(instanceID string) bool {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	runtime := w.runtimes[instanceID]
+	return runtime != nil && runtime.restarting
 }
 
 func waitRuntimeDone(done <-chan struct{}) bool {
@@ -148,6 +167,7 @@ func reconnectDelay(failures int, jitter float64) time.Duration {
 
 func (w *whatsmeowService) restartInstance(instanceID string) error {
 	w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Restarting instance runtime", instanceID)
+	w.markRuntimeRestart(instanceID)
 	done := w.signalRuntimeStop(instanceID)
 	if !waitRuntimeDone(done) {
 		return fmt.Errorf("timed out stopping runtime for instance %s", instanceID)
