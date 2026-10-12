@@ -22,7 +22,6 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/patrickmn/go-cache"
-	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
@@ -164,6 +163,9 @@ type MyClient struct {
 	natsProducer       producer_interfaces.Producer
 	loggerWrapper      *logger_wrapper.LoggerManager
 	qrcodeCount        int
+	// runtimeDone fecha quando o StartClient deste runtime termina; o emissor
+	// de QR usa para não sobreviver ao runtime que o criou.
+	runtimeDone        chan struct{}
 	passkeyCeremony    *ceremony.Store
 
 	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
@@ -366,6 +368,9 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 	var client *whatsmeow.Client
 	var mycli *MyClient
 	defer func() {
+		if mycli != nil {
+			close(mycli.runtimeDone)
+		}
 		if client != nil {
 			if mycli != nil && mycli.eventHandlerID != 0 {
 				client.RemoveEventHandler(mycli.eventHandlerID)
@@ -586,6 +591,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		natsProducer:       w.natsProducer,
 		loggerWrapper:      w.loggerWrapper,
 		qrcodeCount:        0,
+		runtimeDone:        make(chan struct{}),
 		passkeyCeremony:    w.passkeyCeremony,
 	}
 
@@ -763,117 +769,16 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 	}
 }
 
-// handleQRCodes forwards a batch of QR codes (events.QR.Codes) to the manager,
-// rotating them with whatsmeow's native timing (first code ~60s, the rest ~20s)
-// WITHOUT using GetQRChannel. GetQRChannel is deliberately avoided for new-device
-// pairing because, in the installed whatsmeow, its qrChannel handler both
-// auto-confirms PairPasskeyConfirmation when SkipHandoffUX is set (racing our
-// own confirm flow) and Disconnects the socket when codes run out — either of
-// which breaks an in-flight passkey ceremony (DOC2 §4.3/§4.4). Consuming
-// events.QR here keeps the socket alive for as long as pairing (QR or passkey)
-// needs, since events.QR is dispatched to every handler by pair.go regardless.
-//
-// This preserves the original GetQRChannel-loop behavior byte-for-byte for the
-// per-code work (max-count enforcement, PNG encode, DB persist, webhook/queue
-// fan-out) and the timeout teardown; only the trigger (batch vs. per-code) and
-// the rotation/self-timer are new. Runs in its own goroutine so it never blocks
-// the whatsmeow event dispatch.
+// handleQRCodes emite um lote de QR (events.QR.Codes) sem usar o
+// GetQRChannel: o qrChannel do whatsmeow confirma a passkey sozinho
+// (SkipHandoffUX) e derruba o socket no fim dos códigos, o que quebra o
+// pareamento por passkey (DOC2 §4.3/§4.4). O laço fica em runQREmitter, preso
+// à vida deste runtime e ao estado do socket (qr_emitter.go).
 func (mycli *MyClient) handleQRCodes(codes []string) {
 	go func() {
 		defer utils.Recover("handleQRCodes")
-		instanceID := mycli.userID
-		for i, code := range codes {
-			// A successful pair (Store.ID set) or an in-flight passkey ceremony
-			// supersedes QR — stop rotating WITHOUT tearing down. Store.ID stays
-			// nil throughout a passkey ceremony (it is only set at PairSuccess),
-			// so we must also consult the ceremony store, otherwise a ceremony
-			// that outlasts QR rotation would have its socket/client torn down.
-			if mycli.WAClient == nil || mycli.WAClient.Store.ID != nil {
-				return
-			}
-			if mycli.passkeyCeremony != nil && mycli.passkeyCeremony.HasActiveByInstance(instanceID) {
-				mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Passkey ceremony in progress — pausing QR rotation, keeping socket alive", instanceID)
-				return
-			}
-
-			mycli.qrcodeCount++
-
-			if mycli.config.QrcodeMaxCount > 0 {
-				mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] QR code generated #%d (max: %d)", instanceID, mycli.qrcodeCount, mycli.config.QrcodeMaxCount)
-			} else {
-				mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] QR code generated #%d (limit disabled)", instanceID, mycli.qrcodeCount)
-			}
-
-			// Max-count reached: force logout + teardown + QRTimeout (0 = disabled).
-			// But never tear down while a passkey ceremony is in flight.
-			if mycli.config.QrcodeMaxCount > 0 && mycli.qrcodeCount >= mycli.config.QrcodeMaxCount {
-				if mycli.passkeyCeremony != nil && mycli.passkeyCeremony.HasActiveByInstance(instanceID) {
-					mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] QR max-count reached but passkey ceremony active — not tearing down", instanceID)
-					return
-				}
-				mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] Maximum QR code count reached (%d), forcing logout and QRTimeout", instanceID, mycli.config.QrcodeMaxCount)
-
-				if mycli.WAClient.IsConnected() {
-					if err := mycli.WAClient.Logout(context.Background()); err != nil {
-						mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] Error during forced logout: %v", instanceID, err)
-					}
-				}
-				mycli.teardownQR(fmt.Sprintf("Maximum QR code count (%d) reached", mycli.config.QrcodeMaxCount), true)
-				return
-			}
-
-			if mycli.config.LogType != "json" {
-				fmt.Println("QR code:\n", code)
-			}
-
-			image, _ := qrcode.Encode(code, qrcode.Medium, 256)
-			base64qrcode := "data:image/png;base64," + base64.StdEncoding.EncodeToString(image)
-			base64WithCode := base64qrcode + "|" + code
-
-			if err := mycli.instanceRepository.UpdateQrcode(instanceID, base64WithCode); err != nil {
-				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Error updating instance: %s", instanceID, err)
-			}
-
-			postMap := map[string]interface{}{
-				"event": "QRCode",
-				"data": map[string]interface{}{
-					"qrcode":   base64qrcode,
-					"code":     code,
-					"count":    mycli.qrcodeCount,
-					"maxCount": mycli.config.QrcodeMaxCount,
-				},
-				"instanceToken": mycli.token,
-				"instanceId":    instanceID,
-				"instanceName":  mycli.currentInstance().Name,
-			}
-			queueName := strings.ToLower(fmt.Sprintf("%s.%s", instanceID, "QRCode"))
-			if values, err := json.Marshal(postMap); err == nil {
-				go mycli.service.CallWebhook(mycli.currentInstance(), queueName, values)
-				if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
-					go mycli.service.SendToGlobalQueues("QRCode", values, instanceID)
-				}
-			} else {
-				mycli.loggerWrapper.GetLogger(instanceID).LogError("[%s] Failed to marshal JSON for queue", instanceID)
-			}
-
-			// Rotation timing: first code lives ~60s, subsequent ~20s (whatsmeow native).
-			timeout := 20 * time.Second
-			if i == 0 {
-				timeout = 60 * time.Second
-			}
-			time.Sleep(timeout)
-		}
-
-		// Ran out of codes without a PairSuccess. Treat as QR timeout (mirrors
-		// GetQRChannel's "timeout") — UNLESS a passkey ceremony is in flight, in
-		// which case the socket must stay alive for the ceremony to complete.
-		if mycli.WAClient != nil && mycli.WAClient.Store.ID == nil {
-			if mycli.passkeyCeremony != nil && mycli.passkeyCeremony.HasActiveByInstance(instanceID) {
-				mycli.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] QR codes exhausted but passkey ceremony active — keeping socket alive", instanceID)
-				return
-			}
-			mycli.teardownQR("", false)
-		}
+		_, count := runQREmitter(qrEnv{mycli: mycli}, append([]string(nil), codes...), mycli.qrcodeCount, defaultQRTiming)
+		mycli.qrcodeCount = count
 	}()
 }
 
