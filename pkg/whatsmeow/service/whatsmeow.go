@@ -440,6 +440,9 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		if err == nil {
 			store.DeviceProps.Version.Tertiary = proto.Uint32(uint32(version.Patch))
 		}
+		if applyWAVersion(version, true) {
+			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Handshake version set to %d.%d.%d", cd.Instance.Id, version.Major, version.Minor, version.Patch)
+		}
 	} else {
 		// Try to fetch version from WhatsApp Web
 		webVersion, err := fetchWhatsAppWebVersion()
@@ -451,6 +454,9 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 			store.DeviceProps.Version.Primary = proto.Uint32(uint32(version.Major))
 			store.DeviceProps.Version.Secondary = proto.Uint32(uint32(version.Minor))
 			store.DeviceProps.Version.Tertiary = proto.Uint32(uint32(version.Patch))
+			if applyWAVersion(version, false) {
+				w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Handshake version set to %d.%d.%d", cd.Instance.Id, version.Major, version.Minor, version.Patch)
+			}
 		}
 	}
 
