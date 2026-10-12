@@ -666,9 +666,21 @@ func (u *userService) SetProfileName(data *SetProfileNameStruct, instance *insta
 		return false, err
 	}
 
-	err = client.SetGroupName(context.Background(), types.EmptyJID, data.Name)
-	if err != nil {
-		return false, err
+	// O nome de perfil é uma configuração de app state (push name). Antes
+	// usava SetGroupName com JID vazio: o IQ não tem resposta e a requisição
+	// ficava presa ~75s até o timeout. (#176)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := client.SendAppState(ctx, appstate.BuildSettingPushName(data.Name)); err != nil {
+		return false, fmt.Errorf("failed to update profile name: %w", err)
+	}
+
+	// O whatsmeow não aplica a própria mutação ao store local; sem isso a
+	// presença e as mensagens seguintes sairiam com o nome antigo.
+	client.Store.PushName = data.Name
+	if err := client.Store.Save(ctx); err != nil {
+		u.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Profile name updated but not saved locally: %v", instance.Id, err)
 	}
 
 	return true, nil
