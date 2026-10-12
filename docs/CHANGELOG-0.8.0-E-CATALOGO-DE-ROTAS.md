@@ -106,6 +106,7 @@ Variáveis de ambiente (para quem opera o servidor):
 | Variável | Padrão | Para que serve |
 | --- | --- | --- |
 | `REREQUEST_FROM_PHONE` | `true` | Mensagem recebida que não pôde ser decifrada é pedida de novo ao celular, em vez de descartada. Comum no primeiro contato de um número novo (lead de anúncio). `false` desliga. |
+| `QRCODE_MAX_COUNT` | `7` (antes `5`) | Quantas emissões de QR antes de encerrar a sessão de pareamento. Com 7, a janela vai a ~160 s (antes ~120 s). Valor inválido agora usa o padrão em vez de desligar o limite. |
 
 Comportamento novo de presença: com `alwaysOnline=false`, a instância fica online por alguns segundos a cada \~20 horas. Isso evita que o celular desvincule o aparelho por inatividade, sem cortar as notificações.
 

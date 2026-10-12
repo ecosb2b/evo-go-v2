@@ -227,10 +227,12 @@ WEBHOOK_FILES=true
 Número máximo de tentativas de geração de QR Code antes de exigir reconexão manual.
 
 - **Tipo**: Integer
-- **Padrão**: `5`
+- **Padrão**: `7`
+
+Com `7`, aparecem 6 códigos — o primeiro vale ~60 s e os seguintes ~20 s, ~160 s no total. `0` desliga o limite. Valor inválido usa o padrão.
 
 ```env
-QRCODE_MAX_COUNT=5
+QRCODE_MAX_COUNT=7
 ```
 
 ### CHECK_USER_EXISTS

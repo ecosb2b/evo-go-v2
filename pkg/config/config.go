@@ -302,10 +302,7 @@ func Load() *Config {
 		patch, _ = strconv.Atoi(whatsappVersionPatch)
 	}
 
-	qrMaxCount := 5 // Valor padrão
-	if qrcodeMaxCount != "" {
-		qrMaxCount, _ = strconv.Atoi(qrcodeMaxCount)
-	}
+	qrMaxCount := parseQRMaxCount(qrcodeMaxCount)
 
 	amqpGlobalEvents := strings.Split(os.Getenv(config_env.AMQP_GLOBAL_EVENTS), ",")
 	if len(amqpGlobalEvents) == 1 && amqpGlobalEvents[0] == "" {
@@ -498,4 +495,22 @@ func validateAMQPURL(amqpURL string) error {
 
 	logger.LogInfo("[CONFIG] AMQP URL validation successful: %s://%s", parsedURL.Scheme, parsedURL.Host)
 	return nil
+}
+
+// defaultQRMaxCount: a 7ª emissão encerra a sessão, então 6 códigos aparecem
+// (60 s + 5 × 20 s = ~160 s), a janela inteira que o WhatsApp oferece.
+const defaultQRMaxCount = 7
+
+// parseQRMaxCount lê QRCODE_MAX_COUNT. 0 desliga o limite; vazio ou inválido
+// usa o padrão (antes, um valor inválido virava 0 e desligava o limite).
+func parseQRMaxCount(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultQRMaxCount
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return defaultQRMaxCount
+	}
+	return n
 }

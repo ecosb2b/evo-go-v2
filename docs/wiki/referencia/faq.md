@@ -59,7 +59,7 @@ python3 -c "import uuid; print(uuid.uuid4())"
 
 ### Validade do QR Code
 
-Aproximadamente 40 segundos. Após expiração, novo QR Code é gerado automaticamente até atingir `QRCODE_MAX_COUNT` (padrão: 5 tentativas).
+O primeiro QR vale cerca de 60 segundos e cada um dos seguintes cerca de 20 segundos. Com o padrão `QRCODE_MAX_COUNT=7`, a janela total é de ~160 segundos (6 códigos); depois disso é preciso pedir um QR novo. O `GET /instance/qr` informa a validade em `expiresAt`/`expiresIn`.
 
 ### Envio para Múltiplos Destinatários
 
