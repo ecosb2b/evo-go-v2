@@ -11,7 +11,7 @@
 #       scripts/go-test.sh -race ./pkg/whatsmeow/service/ -run TestRuntime
 set -euo pipefail
 
-GO_IMAGE="${GO_IMAGE:-golang:1.25.0-alpine}"
+GO_IMAGE="${GO_IMAGE:-golang:1.26.8-alpine}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Git Bash no Windows: converte o caminho para o formato que o Docker entende

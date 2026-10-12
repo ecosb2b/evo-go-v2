@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Atualiza a dependencia go.mau.fi/whatsmeow para a versao mais recente,
 # usando um container Go de uso unico (nao precisa de Go instalado no Windows).
-# Uso:  bash update-whatsmeow.sh
+# Uso:  bash update-whatsmeow.sh            (última versão)
+#       WHATSMEOW_REF=<sha> bash update-whatsmeow.sh   (commit fixo)
 set -e
 export MSYS_NO_PATHCONV=1
 
@@ -12,9 +13,9 @@ echo ">>> Atualizando (go get + go mod tidy) num container Go..."
 docker run --rm \
   -v "$(pwd):/app" \
   -w /app \
-  golang:1.25.0-alpine \
+  golang:1.26.8-alpine \
   sh -c "apk add --no-cache git >/dev/null 2>&1 && \
-         go get go.mau.fi/whatsmeow@latest && \
+         go get go.mau.fi/whatsmeow@${WHATSMEOW_REF:-latest} && \
          go mod tidy"
 
 echo ""
