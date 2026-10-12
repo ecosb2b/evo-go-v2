@@ -30,6 +30,7 @@ type UserHandler interface {
 	GetUser(ctx *gin.Context)
 	CheckUser(ctx *gin.Context)
 	GetAvatar(ctx *gin.Context)
+	ResolveLid(ctx *gin.Context)
 	GetContacts(ctx *gin.Context)
 	SaveContact(ctx *gin.Context)
 	GetPrivacy(ctx *gin.Context)

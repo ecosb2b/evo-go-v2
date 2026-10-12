@@ -32,6 +32,7 @@ type UserService interface {
 	GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error)
 	CheckUser(data *CheckUserStruct, instance *instance_model.Instance) (*CheckUserCollection, error)
 	GetAvatar(ctx context.Context, data *GetAvatarStruct, instance *instance_model.Instance) (*types.ProfilePictureInfo, error)
+	ResolveLid(data *ResolveLidStruct, instance *instance_model.Instance) (*ResolveLidResult, error)
 	GetContacts(instance *instance_model.Instance) ([]ContactInfo, error)
 	SaveContact(data *SaveContactStruct, instance *instance_model.Instance) error
 	GetPrivacy(instance *instance_model.Instance) (types.PrivacySettings, error)
