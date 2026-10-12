@@ -27,8 +27,8 @@ func TestSendToQueueOrWebhookContinuesAfterProducerFailure(t *testing.T) {
 	failing := errors.New("broker down")
 
 	tests := []struct {
-		name                       string
-		rabbit, nats, ws, webhook  *fakeProducer
+		name                      string
+		rabbit, nats, ws, webhook *fakeProducer
 	}{
 		{"rabbitmq fails", &fakeProducer{err: failing}, &fakeProducer{}, &fakeProducer{}, &fakeProducer{}},
 		{"nats fails", &fakeProducer{}, &fakeProducer{err: failing}, &fakeProducer{}, &fakeProducer{}},

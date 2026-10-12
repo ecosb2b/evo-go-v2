@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/types"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 // Presença do companion. Duas regras opostas precisam conviver:
@@ -85,6 +87,7 @@ func (mycli *MyClient) presenceCurrent(gen uint64) bool {
 // schedulePresenceUpdates mantém o ciclo de alwaysOnline=true: a cada 1-3h
 // alterna unavailable e available, terminando em available.
 func schedulePresenceUpdates(mycli *MyClient, stop <-chan struct{}) {
+	defer utils.Recover("schedulePresenceUpdates")
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
@@ -122,6 +125,7 @@ func processPresenceUpdates(mycli *MyClient) {
 
 // scheduleCompanionActivityPulse dá o pulso de atividade de alwaysOnline=false.
 func scheduleCompanionActivityPulse(mycli *MyClient, stop <-chan struct{}, gen uint64) {
+	defer utils.Recover("scheduleCompanionActivityPulse")
 	timer := time.NewTimer(companionActivityInterval())
 	defer timer.Stop()
 	for {

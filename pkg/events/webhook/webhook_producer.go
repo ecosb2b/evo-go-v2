@@ -12,6 +12,8 @@ import (
 
 	producer_interfaces "github.com/evolution-foundation/evolution-go/pkg/events/interfaces"
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 type webhookProducer struct {
@@ -94,6 +96,7 @@ func splitWebhookURLs(raw string) []string {
 }
 
 func (p *webhookProducer) sendWebhookWithRetry(url string, body []byte, maxRetries int, retryInterval time.Duration, userID string) {
+	defer utils.Recover("sendWebhookWithRetry")
 	for i := 0; i < maxRetries; i++ {
 		err, responseBody, statusCode := p.sendWebhook(url, body, userID)
 		if err == nil {

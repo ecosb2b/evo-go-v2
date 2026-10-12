@@ -303,6 +303,7 @@ func (i instances) Connect(data *ConnectStruct, instance *instance_model.Instanc
 		if client != nil && !client.IsConnected() && client.Store != nil && client.Store.ID != nil {
 			i.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] Instance registered but disconnected, restarting runtime", instance.Id)
 			go func() {
+				defer utils.Recover("connectRestart")
 				if err := i.whatsmeowService.ReconnectClient(instance.Id); err != nil {
 					i.loggerWrapper.GetLogger(instance.Id).LogError("[%s] Restart from /connect failed: %v", instance.Id, err)
 				}
@@ -739,7 +740,7 @@ func (i instances) SetProxy(id string, proxyConfig *ProxyConfig) error {
 	i.loggerWrapper.GetLogger(id).LogInfo("[%s] Proxy configuration updated: %s://%s:%s", id, proxyConfig.Protocol, proxyConfig.Host, proxyConfig.Port)
 
 	// Reconnect to apply proxy changes
-	go i.Reconnect(instance)
+	utils.Go("proxyReconnect", func() { _ = i.Reconnect(instance) })
 
 	return nil
 }
@@ -775,7 +776,7 @@ func (i instances) RemoveProxy(id string) error {
 
 	i.loggerWrapper.GetLogger(id).LogInfo("[%s] Proxy configuration removed", id)
 
-	go i.Reconnect(instance)
+	utils.Go("proxyReconnect", func() { _ = i.Reconnect(instance) })
 
 	return nil
 }

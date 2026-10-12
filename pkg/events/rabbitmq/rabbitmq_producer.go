@@ -10,6 +10,8 @@ import (
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
 	"github.com/gomessguii/logger"
 	amqp "github.com/rabbitmq/amqp091-go"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 type rabbitMQProducer struct {
@@ -66,6 +68,7 @@ func (p *rabbitMQProducer) maskConnectionString(connStr string) string {
 
 // handleConnectionClose monitors connection close events and logs them
 func (p *rabbitMQProducer) handleConnectionClose() {
+	defer utils.Recover("handleConnectionClose")
 	if p.conn == nil {
 		return
 	}

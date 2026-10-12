@@ -8,6 +8,8 @@ import (
 	logger_wrapper "github.com/evolution-foundation/evolution-go/pkg/logger"
 	"github.com/gomessguii/logger"
 	"github.com/gorilla/websocket"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 var upgrader = websocket.Upgrader{
@@ -66,6 +68,7 @@ func ServeWs(w http.ResponseWriter, r *http.Request, instanceId string, producer
 
 	// Goroutine para limpar conexão quando fechada
 	go func() {
+		defer utils.Recover("websocketReadLoop")
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {

@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 const (
@@ -267,6 +269,7 @@ func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
 	}
 
 	go func() {
+		defer utils.Recover("ScheduleReconnect")
 		delay := reconnectDelay(failures, rand.Float64())
 		w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Reconnection scheduled in %s", instanceID, delay)
 		timer := time.NewTimer(delay)

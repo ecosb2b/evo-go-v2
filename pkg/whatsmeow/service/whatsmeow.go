@@ -132,10 +132,10 @@ type whatsmeowService struct {
 }
 
 type MyClient struct {
-	service            WhatsmeowService
-	WAClient           *whatsmeow.Client
-	eventHandlerID     uint32
-	userID             string
+	service        WhatsmeowService
+	WAClient       *whatsmeow.Client
+	eventHandlerID uint32
+	userID         string
 	// instance é trocado quando as settings mudam em runtime (setInstance)
 	// enquanto o handler de eventos o lê: acesso só por currentInstance.
 	instanceMu         sync.RWMutex
@@ -180,6 +180,7 @@ func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
 	}
 
 	go func() {
+		defer utils.Recover("persistMessageAsync")
 		if err := mycli.messageRepository.InsertMessage(message); err != nil {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to persist message %s: %v", mycli.userID, message.MessageID, err)
 		}
@@ -341,6 +342,7 @@ func (w *whatsmeowService) getAuthContainer() (*sqlstore.Container, error) {
 }
 
 func (w *whatsmeowService) StartClient(cd *ClientData) {
+	defer utils.Recover("StartClient")
 
 	w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Starting websocket connection to Whatsapp for user '%s'", cd.Instance.Id)
 	runtimeToken, _, reserved := w.reserveRuntime(cd.Instance.Id)
@@ -760,6 +762,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 // the whatsmeow event dispatch.
 func (mycli *MyClient) handleQRCodes(codes []string) {
 	go func() {
+		defer utils.Recover("handleQRCodes")
 		instanceID := mycli.userID
 		for i, code := range codes {
 			// A successful pair (Store.ID set) or an in-flight passkey ceremony
@@ -1324,6 +1327,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// Auto-marca mensagens como lidas se configurado
 		if mycli.currentInstance().ReadMessages && !evt.Info.IsFromMe {
 			go func() {
+				defer utils.Recover("markRead")
 				time.Sleep(1 * time.Second) // Pequeno delay para parecer mais natural
 				err := mycli.WAClient.MarkRead(context.Background(), []types.MessageID{evt.Info.ID}, evt.Info.Timestamp, evt.Info.Chat, evt.Info.Sender)
 				if err != nil {
@@ -2292,6 +2296,7 @@ func (w *whatsmeowService) SendOperationalEvent(instance *instance_model.Instanc
 }
 
 func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte) {
+	defer utils.Recover("CallWebhook")
 	var data map[string]interface{}
 	if err := json.Unmarshal(jsonData, &data); err != nil {
 		return
@@ -2468,6 +2473,7 @@ func contains(subscriptions []string, event string) bool {
 }
 
 func (w *whatsmeowService) sendToQueueOrWebhook(instance *instance_model.Instance, queueName string, jsonData []byte) {
+	defer utils.Recover("sendToQueueOrWebhook")
 	if instance.RabbitmqEnable == "enabled" || instance.RabbitmqEnable == "true" {
 		err := w.rabbitmqProducer.Produce(queueName, jsonData, instance.RabbitmqEnable, instance.Id)
 		if err != nil {
@@ -2677,6 +2683,7 @@ func getExtensionFromMimeType(mimeType string) string {
 }
 
 func (w *whatsmeowService) SendToGlobalQueues(eventType string, payload []byte, userId string) {
+	defer utils.Recover("SendToGlobalQueues")
 	w.loggerWrapper.GetLogger(userId).LogInfo("[%s] Starting sendToGlobalQueues for event: %s", userId, eventType)
 
 	// AMQP: AMQP_SPECIFIC_EVENTS tem prioridade sobre AMQP_GLOBAL_EVENTS
@@ -3043,7 +3050,7 @@ func (w whatsmeowService) DispatchToTypebot(instance *instance_model.Instance, r
 	if w.typebotProcessor == nil || instance == nil {
 		return
 	}
-	go w.typebotProcessor.ProcessMessage(instance, remoteJid, pushName, content, fromMe)
+	utils.Go("typebotProcessMessage", func() { w.typebotProcessor.ProcessMessage(instance, remoteJid, pushName, content, fromMe) })
 }
 
 // GetPollService retorna o serviço de polls (evita dupla inicialização)
