@@ -344,21 +344,25 @@ func (i instances) Disconnect(instance *instance_model.Instance) (*instance_mode
 
 	if client.IsConnected() {
 		if client.IsLoggedIn() {
-			i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Disconnection successful", instance.Id)
-			if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
-				return instance, err
-			}
-
 			// Não apagar instance.Events: com a string vazia, depois do
 			// /reconnect o filtro de eventos descarta todo webhook
 			// (strings.Split("", ",") devolve [""]). Só o estado de conexão
 			// muda, sem regravar a linha inteira. [upstream#187]
+			//
+			// O motivo vai antes de parar o runtime: uma reconexão do
+			// supervisor que esteja esperando esse mesmo stop relê o motivo
+			// e desiste, em vez de religar a instância.
 			instance.Connected = false
 			instance.DisconnectReason = instance_model.DisconnectReasonByAPI
 			if err := i.instanceRepository.UpdateConnected(instance.Id, false, instance.DisconnectReason); err != nil {
 				return instance, err
 			}
 
+			if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+				return instance, err
+			}
+
+			i.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Disconnection successful", instance.Id)
 			return instance, nil
 		}
 	}
@@ -379,16 +383,16 @@ func (i instances) Logout(instance *instance_model.Instance) (*instance_model.In
 			return instance, err
 		}
 
-		// Parar o runtime antes de gravar o motivo: o ramo de kill do
-		// StartClient também grava disconnect_reason e sobrescreveria este.
-		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
-			return instance, err
-		}
-
+		// Motivo antes do stop, como no Disconnect: o ramo de kill só grava a
+		// coluna connected, e o supervisor relê o motivo após o stop.
 		instance.Connected = false
 		instance.DisconnectReason = instance_model.DisconnectReasonLogoutByAPI
 		err = i.instanceRepository.UpdateConnected(instance.Id, false, instance.DisconnectReason)
 		if err != nil {
+			return instance, err
+		}
+
+		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
 			return instance, err
 		}
 
@@ -460,6 +464,12 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 		if client == nil {
 			logger.LogInfo("[%s] No client found, starting new instance for QR code", instance.Id)
 		} else {
+			// Pareada mas fora do ar (conectando ou após stream:error): QR não
+			// se aplica e derrubar o runtime atrapalharia a reconexão.
+			if client.Store != nil && client.Store.ID != nil {
+				logger.LogInfo("[%s] Paired client is reconnecting — no QR to return", instance.Id)
+				return nil, fmt.Errorf("session already logged in")
+			}
 			logger.LogInfo("[%s] Client exists but not connected/logged, restarting for QR code", instance.Id)
 			// O runtime antigo continua reservado mesmo com o socket morto, e o
 			// StartInstance abaixo viraria no-op ("already running") até o

@@ -140,3 +140,17 @@ func TestRuntimeRestartMarkIsPerRuntime(t *testing.T) {
 		t.Fatal("restart mark leaked into the next runtime")
 	}
 }
+
+// Restart que expira deixa o runtime vivo; um stop posterior (ex.: disconnect
+// pela API) não pode ser tratado como restart e engolir o LoggedOut.
+func TestUnmarkRuntimeRestart(t *testing.T) {
+	service := &whatsmeowService{}
+	if _, _, ok := service.reserveRuntime("instance-1"); !ok {
+		t.Fatal("expected runtime reservation")
+	}
+	service.markRuntimeRestart("instance-1")
+	service.unmarkRuntimeRestart("instance-1")
+	if service.runtimeRestarting("instance-1") {
+		t.Fatal("restart mark still set after unmark")
+	}
+}

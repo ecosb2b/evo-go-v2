@@ -101,20 +101,26 @@ func schedulePresenceUpdates(mycli *MyClient, stop <-chan struct{}) {
 				return
 			}
 
-			processPresenceUpdates(mycli)
+			processPresenceUpdates(mycli, stop)
 
 			ticker.Reset(time.Duration(1+rand.Intn(3)) * time.Hour)
 		}
 	}
 }
 
-func processPresenceUpdates(mycli *MyClient) {
+func processPresenceUpdates(mycli *MyClient, stop <-chan struct{}) {
 	logger := mycli.loggerWrapper.GetLogger(mycli.userID)
 	if err := mycli.WAClient.SendPresence(context.Background(), types.PresenceUnavailable); err != nil {
 		logger.LogError("[%s] Failed to set presence as unavailable %v", mycli.userID, err)
 	}
 
-	time.Sleep(time.Duration(1+rand.Intn(5)) * time.Second)
+	// Se alwaysOnline foi desligado durante a pausa, o reconcile já mandou
+	// unavailable; mandar available agora deixaria a conta online.
+	select {
+	case <-stop:
+		return
+	case <-time.After(time.Duration(1+rand.Intn(5)) * time.Second):
+	}
 
 	if err := mycli.WAClient.SendPresence(context.Background(), types.PresenceAvailable); err != nil {
 		logger.LogError("[%s] Failed to set presence as available %v", mycli.userID, err)

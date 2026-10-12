@@ -229,7 +229,7 @@ func (w *whatsmeowService) ReconnectClient(instanceId string) error {
 		return nil
 	}
 
-	err := w.restartInstance(instanceId)
+	err := w.restartInstance(instanceId, false)
 	w.finishReconnect(instanceId, err == nil)
 	return err
 }
@@ -703,7 +703,10 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 			cd.Instance.Connected = false
 
-			err := w.instanceRepository.UpdateConnected(cd.Instance.Id, cd.Instance.Connected, cd.Instance.DisconnectReason)
+			// Só a coluna connected: o motivo é de quem pediu o stop (API,
+			// supervisor) e já foi gravado por ele; cd.Instance.DisconnectReason
+			// é o valor da subida do runtime e o sobrescreveria.
+			err := w.instanceRepository.UpdateConnectSettings(cd.Instance.Id, map[string]interface{}{"connected": false})
 			if err != nil {
 				w.loggerWrapper.GetLogger(cd.Instance.Id).LogError("[%s] Error updating instance: %s", cd.Instance.Id, err)
 			}
@@ -2658,7 +2661,9 @@ func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 func (w *whatsmeowService) hasDeviceStore(rawJID string) (bool, error) {
 	jid, ok := utils.ParseJID(rawJID)
 	if !ok {
-		return false, fmt.Errorf("invalid jid %q", rawJID)
+		// Jid ilegível não tem sessão a restaurar; tratar como erro faria o
+		// supervisor tentar de novo para sempre.
+		return false, nil
 	}
 	container, err := w.getAuthContainer()
 	if err != nil {
@@ -3003,6 +3008,12 @@ func (w *whatsmeowService) ClearInstanceCache(instanceId string, token string) e
 	}
 
 	// Also clear stale entries left by a runtime that never reached StartClient.
+	// Se outro runtime já foi reservado nesse meio-tempo (restart concorrente),
+	// as entradas são dele: apagá-las o deixaria sem kill channel, impossível
+	// de parar.
+	if w.runtimeDone(instanceId) != nil {
+		return nil
+	}
 	ClientMapsMu.Lock()
 	delete(w.clientPointer, instanceId)
 	delete(w.myClientPointer, instanceId)

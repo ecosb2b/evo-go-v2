@@ -95,6 +95,14 @@ func (w *whatsmeowService) markRuntimeRestart(instanceID string) {
 	}
 }
 
+func (w *whatsmeowService) unmarkRuntimeRestart(instanceID string) {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+	if runtime := w.runtimes[instanceID]; runtime != nil {
+		runtime.restarting = false
+	}
+}
+
 func (w *whatsmeowService) runtimeRestarting(instanceID string) bool {
 	w.lifecycleMu.Lock()
 	defer w.lifecycleMu.Unlock()
@@ -167,12 +175,26 @@ func reconnectDelay(failures int, jitter float64) time.Duration {
 	return delay + time.Duration(float64(delay)*0.25*jitter)
 }
 
-func (w *whatsmeowService) restartInstance(instanceID string) error {
+// errReconnectCancelled: o estado mudou enquanto o runtime parava (ex.:
+// /instance/disconnect concorrente) e a instância deve ficar parada.
+var errReconnectCancelled = errors.New("reconnect cancelled: instance should stay down")
+
+// restartInstance para o runtime atual e sobe outro. recheck reavalia, depois
+// do stop, se a instância ainda deve voltar: o supervisor usa isso porque um
+// disconnect pela API pode ter esperado o mesmo stop; o ReconnectClient
+// explícito não.
+func (w *whatsmeowService) restartInstance(instanceID string, recheck bool) error {
 	w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Restarting instance runtime", instanceID)
 	w.markRuntimeRestart(instanceID)
 	done := w.signalRuntimeStop(instanceID)
 	if !waitRuntimeDone(done) {
+		// O runtime segue vivo; um stop futuro não é restart.
+		w.unmarkRuntimeRestart(instanceID)
 		return fmt.Errorf("timed out stopping runtime for instance %s", instanceID)
+	}
+
+	if recheck && w.reconnectDecision(instanceID) == reconnectStop {
+		return errReconnectCancelled
 	}
 
 	instance, err := w.instanceRepository.GetInstanceByID(instanceID)
@@ -290,7 +312,12 @@ func (w *whatsmeowService) ScheduleReconnect(instanceID string) {
 			return
 		}
 
-		err := w.restartInstance(instanceID)
+		err := w.restartInstance(instanceID, true)
+		if errors.Is(err, errReconnectCancelled) {
+			w.loggerWrapper.GetLogger(instanceID).LogInfo("[%s] Reconnection cancelled after stop: instance should stay down", instanceID)
+			w.abandonReconnect(instanceID)
+			return
+		}
 		connected := false
 		if err == nil {
 			deadline := time.NewTimer(reconnectProbeTime)
