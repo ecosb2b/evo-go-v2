@@ -92,6 +92,10 @@ Os eventos ficaram mais completos. Nenhum campo existente mudou de nome ou forma
 | `SendStatus` | Passa a ser entregue | Grupo `SEND_MESSAGE`: envio por `/send/status/*`. Antes só chegava a quem assinava `ALL`. |
 | `ButtonClick`, `Picture`, `UserAbout` | Filas globais | Agora chegam também nas filas globais do RabbitMQ e do NATS (antes só no webhook). |
 | Todos | Entrega independente | Uma falha no RabbitMQ, NATS ou websocket não impede mais o webhook do mesmo evento. |
+| `PairError` | Novo | Grupo `QRCODE`: o QR foi escaneado, mas o pareamento falhou (o celular mostra "Não foi possível conectar"). `data.error` traz o motivo. Gere um QR novo. |
+| `QRTimeout` / `LoggedOut` | Menos disparos | O fim de uma janela de QR sem scan emite só `QRTimeout`; antes também saía um `LoggedOut` enganoso. |
+| `QRCode` | Campo novo | `data.expiresAt` (unix): quando o código vence. Se o WhatsApp trocar a chave durante o pareamento, o código atual é reemitido com a chave nova. |
+| `QRTimeout` | Novo motivo | `data.reason = "QR socket closed before pairing"`: a conexão do QR caiu antes do scan; peça um QR novo. |
 
 Variáveis de ambiente (para quem opera o servidor):
 

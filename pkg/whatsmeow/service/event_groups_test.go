@@ -23,6 +23,7 @@ func TestGlobalEventGroup(t *testing.T) {
 		"JoinedGroup":          event_types.GROUP,
 		"NewsletterLeave":      event_types.NEWSLETTER,
 		"QRCode":               event_types.QRCODE,
+		"PairError":            event_types.QRCODE,
 		"PasskeyRequest":       event_types.QRCODE,
 		"PasskeyConfirmation":  event_types.QRCODE,
 		"PasskeyError":         event_types.QRCODE,

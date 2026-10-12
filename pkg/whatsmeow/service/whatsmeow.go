@@ -988,6 +988,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 			}
 		}
+	case *events.PairError:
+		// O scan chegou, mas o pareamento falhou (chave inválida, erro ao gravar
+		// o aparelho): é o "Não foi possível conectar" que o celular mostra.
+		errText := ""
+		if evt.Error != nil {
+			errText = evt.Error.Error()
+		}
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Pairing failed after scan: %s", mycli.userID, errText)
+		doWebhook = true
+		postMap["event"] = "PairError"
+		postMap["data"] = map[string]interface{}{
+			"error":    errText,
+			"jid":      evt.ID.String(),
+			"platform": evt.Platform,
+		}
 	case *events.PairSuccess:
 		doWebhook = true
 		postMap["event"] = "PairSuccess"
@@ -2450,7 +2465,7 @@ func (w *whatsmeowService) CallWebhook(instance *instance_model.Instance, queueN
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)
 		}
-	case "QRCode", "QRTimeout", "QRSuccess", "PasskeyRequest", "PasskeyConfirmation", "PasskeyError":
+	case "QRCode", "QRTimeout", "QRSuccess", "PairError", "PasskeyRequest", "PasskeyConfirmation", "PasskeyError":
 		if contains(subscriptions, "QRCODE") {
 			w.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Event received of type %s", instance.Id, eventType)
 			w.sendToQueueOrWebhook(instance, queueName, jsonData)

@@ -38,7 +38,7 @@ func globalEventGroup(eventType string) string {
 		return event_types.GROUP
 	case "NewsletterJoin", "NewsletterLeave":
 		return event_types.NEWSLETTER
-	case "QRCode", "QRTimeout", "QRSuccess", "PasskeyRequest", "PasskeyConfirmation", "PasskeyError":
+	case "QRCode", "QRTimeout", "QRSuccess", "PairError", "PasskeyRequest", "PasskeyConfirmation", "PasskeyError":
 		return event_types.QRCODE
 	case "ButtonClick":
 		return event_types.BUTTON_CLICK
