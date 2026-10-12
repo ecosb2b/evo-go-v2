@@ -172,6 +172,10 @@ type MyClient struct {
 	presenceStop   chan struct{}
 	presenceOnline bool
 	presenceGen    uint64
+
+	// Tentativas de recuperação de app state por coleção (appstate_recovery.go).
+	appStateRecoveryMu sync.Mutex
+	appStateRecovery   map[appstate.WAPatchName]appStateRecoveryAttempt
 }
 
 func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
@@ -932,7 +936,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// so the socket survives a passkey ceremony). Forward + rotate them.
 		mycli.handleQRCodes(evt.Codes)
 		return
+	case *events.AppStateSyncError:
+		mycli.handleAppStateSyncError(evt)
+		return
 	case *events.AppStateSyncComplete:
+		if evt.Recovery {
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] App-state recovery completed for %s at version %d", mycli.userID, evt.Name, evt.Version)
+		}
 		// Com alwaysOnline=true, mandar unavailable aqui derrubava a presença
 		// que o Connected acabou de pôr em available.
 		if len(mycli.WAClient.Store.PushName) > 0 && evt.Name == appstate.WAPatchCriticalBlock && !mycli.currentInstance().AlwaysOnline {
