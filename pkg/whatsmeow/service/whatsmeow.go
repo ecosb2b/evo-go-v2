@@ -523,6 +523,10 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 	client.EnableAutoReconnect = false
 	client.AutoTrustIdentity = true
+	// Mensagem que falha ao decifrar é pedida de novo ao celular em vez de
+	// descartada; sem isso o primeiro contato de um lead novo se perde.
+	// [upstream#156]
+	client.AutomaticMessageRerequestFromPhone = w.config.RerequestFromPhone
 
 	mycli = &MyClient{
 		service:            w,
@@ -2246,11 +2250,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			postMap["data"] = evt
 		} else if strings.HasPrefix(evt.Info.ID, "66") || strings.HasPrefix(evt.Info.ID, "67") {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] ID 66 or 67 found, reconnecting client", mycli.userID)
-			mycli.WAClient.Disconnect()
-			err := mycli.WAClient.Connect()
-			if err != nil {
-				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error reconnecting client: %s", mycli.userID, err)
-			}
+			// A reconexão é do supervisor: Disconnect/Connect direto aqui criava
+			// um socket fora do token de runtime.
+			mycli.service.ScheduleReconnect(mycli.userID)
 		} else {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] ID is not 66 or 67 or view_once, skipping", mycli.userID)
 		}

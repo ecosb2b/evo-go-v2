@@ -45,6 +45,7 @@ const (
 	EVENT_IGNORE_STATUS     = "EVENT_IGNORE_STATUS"
 	QRCODE_MAX_COUNT        = "QRCODE_MAX_COUNT"
 	CHECK_USER_EXISTS       = "CHECK_USER_EXISTS"
+	REREQUEST_FROM_PHONE    = "REREQUEST_FROM_PHONE"
 
 	// Proteções do Typebot contra flood e laço. Todas lidas no boot: alterar
 	// exige recriar o container, não imagem nova.

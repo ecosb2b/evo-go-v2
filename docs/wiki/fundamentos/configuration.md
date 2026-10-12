@@ -246,6 +246,18 @@ CHECK_USER_EXISTS=true
 
 **Nota**: `false` pode resultar em erros de envio para números inválidos.
 
+### REREQUEST_FROM_PHONE
+
+Quando uma mensagem recebida não pode ser decifrada, pede ao celular que a
+reenvie, em vez de descartá-la. Comum no primeiro contato de um número novo.
+
+- **Tipo**: Boolean
+- **Padrão**: `true`
+
+```env
+REREQUEST_FROM_PHONE=true
+```
+
 ### EVENT_IGNORE_GROUP
 
 Ignora eventos originados de grupos.

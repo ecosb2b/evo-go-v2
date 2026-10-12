@@ -61,6 +61,7 @@ type Config struct {
 	EventIgnoreStatus    bool
 	QrcodeMaxCount       int
 	CheckUserExists      bool
+	RerequestFromPhone   bool
 
 	// Proteções do Typebot. Ver pkg/typebot/service/protection.go.
 	TypebotContactRateLimit  int
@@ -281,6 +282,7 @@ func Load() *Config {
 	eventIgnoreStatus := os.Getenv(config_env.EVENT_IGNORE_STATUS)
 	qrcodeMaxCount := os.Getenv(config_env.QRCODE_MAX_COUNT)
 	checkUserExists := os.Getenv(config_env.CHECK_USER_EXISTS)
+	rerequestFromPhone := os.Getenv(config_env.REREQUEST_FROM_PHONE)
 
 	if checkUserExists == "" {
 		checkUserExists = "true"
@@ -395,6 +397,7 @@ func Load() *Config {
 		EventIgnoreStatus:    eventIgnoreStatus == "true",
 		QrcodeMaxCount:       qrMaxCount,
 		CheckUserExists:      checkUserExists != "false", // Default true, set to false to disable
+		RerequestFromPhone:   rerequestFromPhone != "false", // Default true, set to false to disable
 		AmqpGlobalEvents:     amqpGlobalEvents,
 		AmqpSpecificEvents:   amqpSpecificEvents,
 		NatsUrl:              natsUrl,
