@@ -204,3 +204,15 @@ func TestQREmitterCountContinuesAcrossBatches(t *testing.T) {
 		t.Fatalf("end=%v count=%d published=%+v", r.end, r.count, published)
 	}
 }
+
+func TestMarkRuntimeStoppingIsIdempotent(t *testing.T) {
+	mycli := &MyClient{runtimeDone: make(chan struct{})}
+
+	mycli.markRuntimeStopping()
+	select {
+	case <-mycli.runtimeDone:
+	default:
+		t.Fatal("runtimeDone must be closed after the first call")
+	}
+	mycli.markRuntimeStopping() // não pode dar panic (close duplo)
+}

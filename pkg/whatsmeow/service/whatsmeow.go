@@ -166,6 +166,7 @@ type MyClient struct {
 	// runtimeDone fecha quando o StartClient deste runtime termina; o emissor
 	// de QR usa para não sobreviver ao runtime que o criou.
 	runtimeDone        chan struct{}
+	runtimeStopOnce    sync.Once
 	passkeyCeremony    *ceremony.Store
 
 	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
@@ -369,7 +370,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 	var mycli *MyClient
 	defer func() {
 		if mycli != nil {
-			close(mycli.runtimeDone)
+			mycli.markRuntimeStopping()
 		}
 		if client != nil {
 			if mycli != nil && mycli.eventHandlerID != 0 {
@@ -703,6 +704,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		select {
 		case <-killChan:
 			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Received kill signal for user '%s'", cd.Instance.Id)
+			mycli.markRuntimeStopping()
 			client.Disconnect()
 
 			ClientMapsMu.Lock()
@@ -3009,4 +3011,9 @@ func cleanSenderID(senderID string) string {
 		}
 	}
 	return senderID
+}
+
+// markRuntimeStopping avisa o emissor de QR (e quem mais esperar runtimeDone) que este runtime está parando. Idempotente: chamado no ramo de kill, antes do Disconnect, e no defer do StartClient.
+func (mycli *MyClient) markRuntimeStopping() {
+	mycli.runtimeStopOnce.Do(func() { close(mycli.runtimeDone) })
 }
