@@ -2630,26 +2630,30 @@ func (w *whatsmeowService) StartInstance(instanceId string) error {
 
 func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 	w.loggerWrapper.GetLogger(clientName).LogInfo("Connecting all instances on startup")
-	var instances []*instance_model.Instance
-	var err error
 
-	if clientName != "" {
-		instances, err = w.instanceRepository.GetAllConnectedInstancesByClientName(clientName)
-		if err != nil {
-			w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error getting all connected instances: %s", clientName, err)
-			return
-		}
-	} else {
-		instances, err = w.instanceRepository.GetAllConnectedInstances()
-		if err != nil {
-			w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error getting all connected instances: %s", clientName, err)
-			return
-		}
+	instances, err := w.instanceRepository.GetInstancesToRestore(clientName)
+	if err != nil {
+		w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error getting instances to restore: %s", clientName, err)
+		return
 	}
 
-	w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Found %d connected instances", clientName, len(instances))
+	w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Found %d instances to restore", clientName, len(instances))
 
 	for _, instance := range instances {
+		// Quem caiu sem ninguém pedir só volta se ainda tiver sessão: logout
+		// pelo celular apaga o device mas mantém o jid, e religar geraria QR.
+		if !instance.Connected {
+			paired, err := w.hasDeviceStore(instance.Jid)
+			if err != nil {
+				w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error checking device store for '%s': %s", clientName, instance.Id, err)
+				continue
+			}
+			if !paired {
+				w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Skipping '%s': no session left for jid %s", clientName, instance.Id, instance.Jid)
+				continue
+			}
+		}
+
 		w.loggerWrapper.GetLogger(clientName).LogInfo("[%s] Starting client for user '%s'", clientName, instance.Id)
 
 		err := w.StartInstance(instance.Id)
@@ -2657,6 +2661,23 @@ func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 			w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error starting client: %s", clientName, err)
 		}
 	}
+}
+
+// hasDeviceStore informa se ainda existe sessão do whatsmeow para o jid.
+func (w *whatsmeowService) hasDeviceStore(rawJID string) (bool, error) {
+	jid, ok := utils.ParseJID(rawJID)
+	if !ok {
+		return false, fmt.Errorf("invalid jid %q", rawJID)
+	}
+	container, err := w.getAuthContainer()
+	if err != nil {
+		return false, err
+	}
+	device, err := container.GetDevice(context.Background(), jid)
+	if err != nil {
+		return false, err
+	}
+	return device != nil, nil
 }
 
 func getExtensionFromMimeType(mimeType string) string {

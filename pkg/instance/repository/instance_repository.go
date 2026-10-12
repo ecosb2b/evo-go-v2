@@ -28,8 +28,7 @@ type InstanceRepository interface {
 	UpdateJid(userId string, jid string) error
 	UpdateName(instanceId string, name string) error
 	UpdateConnectSettings(instanceId string, updates map[string]interface{}) error
-	GetAllConnectedInstances() ([]*instance_model.Instance, error)
-	GetAllConnectedInstancesByClientName(clientName string) ([]*instance_model.Instance, error)
+	GetInstancesToRestore(clientName string) ([]*instance_model.Instance, error)
 	GetAll(clientName string) ([]*instance_model.Instance, error)
 	Delete(instanceId string) error
 	GetAdvancedSettings(instanceId string) (*instance_model.AdvancedSettings, error)
@@ -137,20 +136,21 @@ func (i *instanceRepository) UpdateConnectSettings(instanceId string, updates ma
 	return err
 }
 
-func (i *instanceRepository) GetAllConnectedInstances() ([]*instance_model.Instance, error) {
+// GetInstancesToRestore lista as instâncias que o boot deve religar: as
+// pareadas (jid preenchido) que estavam conectadas ou que caíram sem ninguém
+// pedir. Filtrar só por connected = true deixava de fora quem estava no meio
+// de uma reconexão no momento do redeploy. Desconexão e logout pedidos pela
+// API ficam de fora. [upstream#154]
+func (i *instanceRepository) GetInstancesToRestore(clientName string) ([]*instance_model.Instance, error) {
 	var instances []*instance_model.Instance
-	err := i.db.Where("connected = ?", true).Find(&instances).Error
-	if err != nil {
-		return nil, err
+	query := i.db.Where("jid <> ''").Where(
+		"connected = true OR disconnect_reason IS NULL OR disconnect_reason NOT IN ?",
+		[]string{instance_model.DisconnectReasonByAPI, instance_model.DisconnectReasonLogoutByAPI},
+	)
+	if clientName != "" {
+		query = query.Where("client_name = ?", clientName)
 	}
-
-	return instances, nil
-}
-
-func (i *instanceRepository) GetAllConnectedInstancesByClientName(clientName string) ([]*instance_model.Instance, error) {
-	var instances []*instance_model.Instance
-	err := i.db.Where("connected = ? AND client_name = ?", true, clientName).Find(&instances).Error
-	if err != nil {
+	if err := query.Find(&instances).Error; err != nil {
 		return nil, err
 	}
 
