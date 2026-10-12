@@ -1141,10 +1141,24 @@ Para citar/responder uma mensagem, adicione o objeto `quoted` em qualquer endpoi
   "text": "Respondendo sua mensagem",
   "quoted": {
     "messageId": "3EB0C5A277F7F9B6C599",
-    "participant": "5511999999999@s.whatsapp.net"
+    "participant": "5511999999999@s.whatsapp.net",
+    "text": "Texto da mensagem original"
   }
 }
 ```
+
+O servidor não guarda o conteúdo das mensagens, então, para o card de citação
+mostrar a prévia e abrir a original ao ser tocado, envie também o conteúdo
+citado:
+
+- `text`: texto da mensagem original; ou
+- `message`: o objeto `message` recebido no webhook (ex.:
+  `{"conversation": "..."}` ou `{"imageMessage": {...}}`). Tem prioridade
+  sobre `text`.
+
+Sem nenhum dos dois, a citação continua funcionando, mas o card aparece vazio.
+O formato da Evolution API v2 também é aceito:
+`"quoted": {"key": {"id": "...", "participant": "..."}, "message": {...}}`.
 
 ### Menções em Grupos
 
