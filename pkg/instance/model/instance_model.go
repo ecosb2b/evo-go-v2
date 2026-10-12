@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// Motivos gravados em disconnect_reason quando a desconexão foi pedida pela
+// API. O boot usa isso para não religar instâncias desligadas de propósito.
+const (
+	DisconnectReasonByAPI       = "Disconnected by API"
+	DisconnectReasonLogoutByAPI = "Logged out by API"
+)
+
 type Instance struct {
 	Id               string    `json:"id" gorm:"type:uuid;primaryKey"`
 	Name             string    `json:"name"`

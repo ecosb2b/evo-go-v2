@@ -332,10 +332,13 @@ func (i instances) Disconnect(instance *instance_model.Instance) (*instance_mode
 				return instance, err
 			}
 
-			instance.Events = ""
-
-			err := i.instanceRepository.Update(instance)
-			if err != nil {
+			// Não apagar instance.Events: com a string vazia, depois do
+			// /reconnect o filtro de eventos descarta todo webhook
+			// (strings.Split("", ",") devolve [""]). Só o estado de conexão
+			// muda, sem regravar a linha inteira. [upstream#187]
+			instance.Connected = false
+			instance.DisconnectReason = instance_model.DisconnectReasonByAPI
+			if err := i.instanceRepository.UpdateConnected(instance.Id, false, instance.DisconnectReason); err != nil {
 				return instance, err
 			}
 
@@ -360,7 +363,8 @@ func (i instances) Logout(instance *instance_model.Instance) (*instance_model.In
 		}
 
 		instance.Connected = false
-		err = i.instanceRepository.Update(instance)
+		instance.DisconnectReason = instance_model.DisconnectReasonLogoutByAPI
+		err = i.instanceRepository.UpdateConnected(instance.Id, false, instance.DisconnectReason)
 		if err != nil {
 			return instance, err
 		}
@@ -699,8 +703,9 @@ func (i instances) SetProxy(id string, proxyConfig *ProxyConfig) error {
 
 	instance.Proxy = string(proxyJSON)
 
-	// Update instance in database
-	err = i.instanceRepository.Update(instance)
+	// Só a coluna proxy: regravar a linha inteira sobrescreveria settings
+	// alterados em paralelo.
+	err = i.instanceRepository.UpdateProxy(id, instance.Proxy)
 	if err != nil {
 		i.loggerWrapper.GetLogger(id).LogError("[%s] Failed to update instance with proxy: %v", id, err)
 		return err
@@ -738,7 +743,7 @@ func (i instances) RemoveProxy(id string) error {
 
 	instance.Proxy = ""
 
-	err = i.instanceRepository.Update(instance)
+	err = i.instanceRepository.UpdateProxy(id, "")
 	if err != nil {
 		return err
 	}
