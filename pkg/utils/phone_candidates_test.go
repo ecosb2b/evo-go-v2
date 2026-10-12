@@ -22,6 +22,11 @@ func TestWhatsAppNumberCandidates(t *testing.T) {
 			want:  []string{"+5531987654321", "+553187654321"},
 		},
 		{
+			name:  "device suffix is not part of the number",
+			input: "5531987654321:12@s.whatsapp.net",
+			want:  []string{"+5531987654321", "+553187654321"},
+		},
+		{
 			name:  "BR mobile with 9, DDD < 31",
 			input: "5511987654321",
 			want:  []string{"+5511987654321", "+551187654321"},

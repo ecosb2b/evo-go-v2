@@ -50,6 +50,14 @@ func TestPickRegisteredJID(t *testing.T) {
 			want: withoutNine, wantOK: true,
 		},
 		{
+			name: "query not echoed, both forms resolve to the same JID",
+			resp: []types.IsOnWhatsAppResponse{
+				{JID: withoutNine, IsIn: true},
+				{JID: withoutNine, IsIn: true},
+			},
+			want: withoutNine, wantOK: true,
+		},
+		{
 			name: "none registered",
 			resp: []types.IsOnWhatsAppResponse{
 				{Query: "+5531987654321", IsIn: false},

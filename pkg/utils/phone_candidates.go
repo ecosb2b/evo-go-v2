@@ -11,7 +11,10 @@ import "strings"
 // destinatário registrado com o 9. Consultar as duas numa única chamada deixa
 // o WhatsApp dizer qual existe. [upstream#214]
 func WhatsAppNumberCandidates(number string) []string {
-	digits := onlyDigits(strings.SplitN(number, "@", 2)[0])
+	// Corta o servidor (@...) e o device (:N) antes de extrair os dígitos.
+	user := strings.SplitN(number, "@", 2)[0]
+	user = strings.SplitN(user, ":", 2)[0]
+	digits := onlyDigits(user)
 	if digits == "" {
 		return nil
 	}

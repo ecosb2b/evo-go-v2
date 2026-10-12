@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -520,9 +521,10 @@ func pickRegisteredJID(candidates []string, resp []types.IsOnWhatsAppResponse) (
 	}
 	// Sem eco da consulta não dá para ordenar; só é seguro aceitar se houver
 	// uma única forma registrada.
+	// As duas formas do celular BR costumam resolver para o mesmo JID.
 	var registered []types.JID
 	for _, r := range resp {
-		if r.IsIn {
+		if r.IsIn && !slices.Contains(registered, r.JID) {
 			registered = append(registered, r.JID)
 		}
 	}

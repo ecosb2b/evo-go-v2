@@ -362,14 +362,16 @@ func (i instances) Logout(instance *instance_model.Instance) (*instance_model.In
 			return instance, err
 		}
 
+		// Parar o runtime antes de gravar o motivo: o ramo de kill do
+		// StartClient também grava disconnect_reason e sobrescreveria este.
+		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
+			return instance, err
+		}
+
 		instance.Connected = false
 		instance.DisconnectReason = instance_model.DisconnectReasonLogoutByAPI
 		err = i.instanceRepository.UpdateConnected(instance.Id, false, instance.DisconnectReason)
 		if err != nil {
-			return instance, err
-		}
-
-		if err := i.whatsmeowService.ClearInstanceCache(instance.Id, instance.Token); err != nil {
 			return instance, err
 		}
 
