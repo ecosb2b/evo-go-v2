@@ -638,6 +638,13 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 			}
 		}
 	} else {
+		// Ciclo novo de pareamento: uma cerimônia de passkey de um socket
+		// anterior não vale mais e deixaria o manager preso em
+		// awaiting_confirmation. (#107)
+		if w.passkeyCeremony != nil {
+			w.passkeyCeremony.Clear(cd.Instance.Id)
+		}
+
 		// New-device pairing. We intentionally do NOT use client.GetQRChannel:
 		// in the installed whatsmeow its qrChannel handler auto-confirms a
 		// passkey ceremony (SkipHandoffUX) and Disconnects the socket when the
@@ -2142,6 +2149,12 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	case *events.Disconnected:
 		doWebhook = true
 		postMap["event"] = "Disconnected"
+
+		// A cerimônia de passkey pertence a este socket. Erro (não Clear): a
+		// extensão lê cerimônia apagada como pareamento concluído. (#107)
+		if mycli.WAClient.Store.ID == nil && mycli.passkeyCeremony != nil && mycli.passkeyCeremony.HasActiveByInstance(mycli.userID) {
+			mycli.passkeyCeremony.SetError(mycli.userID, "connection lost during passkey pairing; request a new QR code")
+		}
 
 		// Limpar cache de userInfo para esta instância (mas não para reconexão automática)
 		mycli.userInfoCache.Delete(mycli.currentInstance().Token)
