@@ -51,7 +51,7 @@ func (s *sendHandler) SendEvent(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendEvent(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
