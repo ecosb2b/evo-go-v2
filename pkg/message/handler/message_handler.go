@@ -17,6 +17,7 @@ type MessageHandler interface {
 	GetMessageStatus(ctx *gin.Context)
 	DeleteMessageEveryone(ctx *gin.Context)
 	EditMessage(ctx *gin.Context)
+	SubscribePresence(ctx *gin.Context)
 }
 
 type messageHandler struct {
