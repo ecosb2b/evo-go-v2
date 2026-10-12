@@ -2269,50 +2269,28 @@ func (s *sendService) SendList(data *ListStruct, instance *instance_model.Instan
 		Sections:    sections,
 	}
 
-	// Wrap ListMessage in DocumentWithCaptionMessage (Baileys PR #36) so modern WhatsApp renders it.
-	// MessageSecret (32 random bytes) is required for iOS rendering.
+	// ListMessage top-level, sem wrapper e sem nós manuais (#170/#204): o
+	// whatsmeow injeta o <biz><list v="2" type="single_select"/> ao ver um
+	// ListMessage. O DocumentWithCaptionMessage escondia a lista do whatsmeow,
+	// e o <biz>/<bot> manuais duplicariam o nó que ele gera.
+	// MessageSecret segue presente: o iOS exige para renderizar.
 	listMsgSecret := make([]byte, 32)
 	_, _ = crypto_rand.Read(listMsgSecret)
 
 	msg := &waE2E.Message{
-		DocumentWithCaptionMessage: &waE2E.FutureProofMessage{
-			Message: &waE2E.Message{
-				ListMessage: listMessage,
-			},
-		},
+		ListMessage: listMessage,
 		MessageContextInfo: &waE2E.MessageContextInfo{
 			MessageSecret: listMsgSecret,
 		},
 	}
 
-	// Build biz <list> node — required for mobile rendering of modern lists.
-	listBizNodes := []waBinary.Node{
-		{
-			Tag: "biz",
-			Content: []waBinary.Node{{
-				Tag: "list",
-				Attrs: waBinary.Attrs{
-					"v":    "2",
-					"type": "single_select",
-				},
-			}},
-		},
-	}
-	if !strings.Contains(data.Number, "@g.us") {
-		listBizNodes = append(listBizNodes, waBinary.Node{
-			Tag:   "bot",
-			Attrs: waBinary.Attrs{"biz_bot": "1"},
-		})
-	}
-
 	message, err := s.SendMessage(instance, msg, "ListMessage", &SendDataStruct{
-		Number:          data.Number,
-		Delay:           data.Delay,
-		MentionAll:      data.MentionAll,
-		MentionedJID:    data.MentionedJID,
-		FormatJid:       data.FormatJid,
-		Quoted:          data.Quoted,
-		AdditionalNodes: &listBizNodes,
+		Number:       data.Number,
+		Delay:        data.Delay,
+		MentionAll:   data.MentionAll,
+		MentionedJID: data.MentionedJID,
+		FormatJid:    data.FormatJid,
+		Quoted:       data.Quoted,
 	})
 
 	if err != nil {
