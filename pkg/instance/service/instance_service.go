@@ -463,6 +463,9 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 		return nil, fmt.Errorf("session already logged in")
 	}
 
+	// started: esta chamada subiu a sessão e já esperou por ela (ver abaixo).
+	started := false
+
 	// Se não há cliente OU cliente sem sessão logada, iniciar/reiniciar para gerar QR
 	if client == nil || (!client.IsConnected() && !client.IsLoggedIn()) {
 		start := true
@@ -490,6 +493,7 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 		}
 
 		if start {
+			started = true
 			err := i.whatsmeowService.StartInstance(instance.Id)
 			if err != nil {
 				logger.LogError("[%s] Failed to start instance: %v", instance.Id, err)
@@ -533,18 +537,31 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 		}
 	}
 
+	// Sessão recém-aberta por outra chamada (ex.: o /connect de um instante
+	// atrás): o primeiro código ainda pode estar a caminho, então espera mais.
+	// Se foi esta chamada que subiu a sessão, os 3 s acima já contam.
+	qrWait := qrRetryWait
+	if age, known := i.whatsmeowService.RuntimeAge(instance.Id); !started && known && age < qrConnectGrace {
+		qrWait = qrFirstCodeWait
+	}
+
 	stored, ok := readFreshQR(instance.Qrcode)
 	if !ok {
-		// Sem QR válido ainda (sessão subindo ou código recém-vencido): espera
-		// a próxima rotação antes de desistir.
-		logger.LogInfo("[%s] No valid QR code yet, waiting a bit more...", instance.Id)
-		time.Sleep(2 * time.Second)
-
-		instance, err = i.instanceRepository.GetInstanceByID(instance.Id)
+		// Sem QR válido ainda (sessão subindo ou código recém-vencido): relê o
+		// banco até o código aparecer ou o prazo acabar.
+		logger.LogInfo("[%s] No valid QR code yet, waiting up to %s...", instance.Id, qrWait)
+		instanceID := instance.Id
+		stored, ok, err = pollFreshQR(func() (string, error) {
+			current, err := i.instanceRepository.GetInstanceByID(instanceID)
+			if err != nil {
+				return "", err
+			}
+			return current.Qrcode, nil
+		}, qrWait, qrPollInterval)
 		if err != nil {
 			return nil, err
 		}
-		if stored, ok = readFreshQR(instance.Qrcode); !ok {
+		if !ok {
 			return nil, fmt.Errorf("no QR code available. Please wait a moment and try again")
 		}
 	}
@@ -568,6 +585,37 @@ const qrConnectGrace = 15 * time.Second
 
 func qrRestartAllowed(age time.Duration, known bool) bool {
 	return !known || age >= qrConnectGrace
+}
+
+const (
+	// qrPollInterval: intervalo entre as releituras do QR guardado.
+	qrPollInterval = 500 * time.Millisecond
+	// qrRetryWait: espera por um código novo quando o atual acabou de vencer.
+	qrRetryWait = 2 * time.Second
+	// qrFirstCodeWait: espera pelo PRIMEIRO código de uma sessão que acabou de
+	// abrir (o WhatsApp o entrega 1-3 s depois do /connect). Frontends que
+	// pedem o QR junto com o /connect recebiam erro antes do código chegar.
+	// Fica abaixo dos 8 s que os frontends esperam por esta rota.
+	qrFirstCodeWait = 6 * time.Second
+)
+
+// pollFreshQR relê o QR guardado a cada interval até achar um código válido
+// ou o prazo (budget) acabar. Erro de leitura encerra na hora.
+func pollFreshQR(read func() (string, error), budget, interval time.Duration) (utils.StoredQR, bool, error) {
+	deadline := time.Now().Add(budget)
+	for {
+		time.Sleep(interval)
+		raw, err := read()
+		if err != nil {
+			return utils.StoredQR{}, false, err
+		}
+		if q, ok := readFreshQR(raw); ok {
+			return q, true, nil
+		}
+		if !time.Now().Before(deadline) {
+			return utils.StoredQR{}, false, nil
+		}
+	}
 }
 
 // readFreshQR devolve o QR guardado se ele existir e ainda não tiver vencido.
