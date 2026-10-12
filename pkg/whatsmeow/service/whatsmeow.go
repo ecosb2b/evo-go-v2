@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"image/png"
 	"io"
-	"math/rand"
 	"net/http"
 	"os"
 	"regexp"
@@ -137,7 +136,10 @@ type MyClient struct {
 	WAClient           *whatsmeow.Client
 	eventHandlerID     uint32
 	userID             string
-	Instance           *instance_model.Instance
+	// instance é trocado quando as settings mudam em runtime (setInstance)
+	// enquanto o handler de eventos o lê: acesso só por currentInstance.
+	instanceMu         sync.RWMutex
+	instance           *instance_model.Instance
 	token              string
 	subscriptions      []string
 	webhookUrl         string
@@ -163,6 +165,13 @@ type MyClient struct {
 	loggerWrapper      *logger_wrapper.LoggerManager
 	qrcodeCount        int
 	passkeyCeremony    *ceremony.Store
+
+	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
+	// de presença; presenceGen invalida as de uma configuração anterior.
+	presenceMu     sync.Mutex
+	presenceStop   chan struct{}
+	presenceOnline bool
+	presenceGen    uint64
 }
 
 func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
@@ -539,7 +548,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 	mycli = &MyClient{
 		service:            w,
-		Instance:           cd.Instance,
+		instance:           cd.Instance,
 		WAClient:           client,
 		eventHandlerID:     1,
 		userID:             cd.Instance.Id,
@@ -571,6 +580,8 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 	}
 
 	mycli.eventHandlerID = mycli.WAClient.AddEventHandler(mycli.myEventHandler)
+	// A presença vive enquanto este runtime viver.
+	defer mycli.stopPresence()
 
 	// Armazena o MyClient no map para permitir atualizações posteriores
 	ClientMapsMu.Lock()
@@ -724,62 +735,6 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 	}
 }
 
-func schedulePresenceUpdates(mycli *MyClient) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		// [Athene/PR#127] Copia o kill channel do map sob RLock antes do select.
-		ClientMapsMu.RLock()
-		killChan := mycli.killChannel[mycli.userID]
-		ClientMapsMu.RUnlock()
-
-		select {
-		case <-ticker.C:
-			// Verificar se a instância ainda existe
-			_, err := mycli.instanceRepository.GetInstanceByID(mycli.userID)
-			if err != nil {
-				mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Instance no longer exists, stopping presence updates", mycli.userID)
-				return // Encerra a goroutine se a instância não existir mais
-			}
-
-			processPresenceUpdates(mycli)
-
-			ticker.Stop()
-			randomInterval := time.Duration(1+rand.Intn(3)) * time.Hour
-			ticker = time.NewTicker(randomInterval)
-
-		case <-killChan:
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Received kill signal, stopping presence updates", mycli.userID)
-			return // Encerra a goroutine quando receber sinal de kill
-		}
-	}
-}
-
-func processPresenceUpdates(mycli *MyClient) {
-	now := time.Now()
-	location, _ := time.LoadLocation("America/Sao_Paulo")
-	nowSp := now.In(location)
-
-	if nowSp.Hour() >= 1 && nowSp.Hour() < 24 {
-		err := mycli.WAClient.SendPresence(context.Background(), types.PresenceUnavailable)
-		if err != nil {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to set presence as unavailable %v", mycli.userID, err)
-		} else {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Marked self as unavailable", mycli.userID)
-		}
-
-		time.Sleep(time.Duration(1+rand.Intn(5)) * time.Second)
-
-		err = mycli.WAClient.SendPresence(context.Background(), types.PresenceAvailable)
-		if err != nil {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Failed to set presence as available %v", mycli.userID, err)
-		} else {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Marked self as available", mycli.userID)
-		}
-	}
-}
-
 // handleQRCodes forwards a batch of QR codes (events.QR.Codes) to the manager,
 // rotating them with whatsmeow's native timing (first code ~60s, the rest ~20s)
 // WITHOUT using GetQRChannel. GetQRChannel is deliberately avoided for new-device
@@ -860,11 +815,11 @@ func (mycli *MyClient) handleQRCodes(codes []string) {
 				},
 				"instanceToken": mycli.token,
 				"instanceId":    instanceID,
-				"instanceName":  mycli.Instance.Name,
+				"instanceName":  mycli.currentInstance().Name,
 			}
 			queueName := strings.ToLower(fmt.Sprintf("%s.%s", instanceID, "QRCode"))
 			if values, err := json.Marshal(postMap); err == nil {
-				go mycli.service.CallWebhook(mycli.Instance, queueName, values)
+				go mycli.service.CallWebhook(mycli.currentInstance(), queueName, values)
 				if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
 					go mycli.service.SendToGlobalQueues("QRCode", values, instanceID)
 				}
@@ -929,11 +884,11 @@ func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 		"data":          data,
 		"instanceToken": mycli.token,
 		"instanceId":    instanceID,
-		"instanceName":  mycli.Instance.Name,
+		"instanceName":  mycli.currentInstance().Name,
 	}
 	queueName := strings.ToLower(fmt.Sprintf("%s.%s", instanceID, "QRTimeout"))
 	if values, err := json.Marshal(postMap); err == nil {
-		go mycli.service.CallWebhook(mycli.Instance, queueName, values)
+		go mycli.service.CallWebhook(mycli.currentInstance(), queueName, values)
 		if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
 			go mycli.service.SendToGlobalQueues("QRTimeout", values, instanceID)
 		}
@@ -967,7 +922,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.handleQRCodes(evt.Codes)
 		return
 	case *events.AppStateSyncComplete:
-		if len(mycli.WAClient.Store.PushName) > 0 && evt.Name == appstate.WAPatchCriticalBlock {
+		// Com alwaysOnline=true, mandar unavailable aqui derrubava a presença
+		// que o Connected acabou de pôr em available.
+		if len(mycli.WAClient.Store.PushName) > 0 && evt.Name == appstate.WAPatchCriticalBlock && !mycli.currentInstance().AlwaysOnline {
 			err := mycli.WAClient.SendPresence(context.Background(), types.PresenceUnavailable)
 			if err != nil {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Failed to send unavailable presence %v", mycli.userID, err)
@@ -1020,40 +977,21 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 
 			postMap["data"] = dataMap
 
-			// Respect the alwaysOnline instance flag. Previously the device was marked
-			// online unconditionally on every connect (and the periodic presence job was
-			// started), which kept the linked device permanently "available". WhatsApp then
-			// delivers messages to that active session and suppresses push notifications on
-			// the user's phone. When alwaysOnline is false we now send Unavailable instead.
+			// Presença conforme alwaysOnline (ver presence.go). Idempotente:
+			// PushNameSetting também cai aqui e não duplica goroutines.
+			mycli.reconcilePresence()
 			var err error
-			if mycli.Instance.AlwaysOnline {
-				go schedulePresenceUpdates(mycli)
 
-				err = mycli.WAClient.SendPresence(context.Background(), types.PresenceAvailable)
-				if err != nil {
-					mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Failed to send available presence %v", mycli.userID, err)
-				} else {
-					mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Marked self as available", mycli.userID)
-				}
-			} else {
-				err = mycli.WAClient.SendPresence(context.Background(), types.PresenceUnavailable)
-				if err != nil {
-					mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Failed to send unavailable presence %v", mycli.userID, err)
-				} else {
-					mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Marked self as unavailable (alwaysOnline=false)", mycli.userID)
-				}
+			mycli.currentInstance().Connected = true
+			mycli.currentInstance().DisconnectReason = ""
+			err = mycli.instanceRepository.UpdateConnected(mycli.currentInstance().Id, mycli.currentInstance().Connected, mycli.currentInstance().DisconnectReason)
+			if err != nil {
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 			}
 
-			mycli.Instance.Connected = true
-			mycli.Instance.DisconnectReason = ""
-			err = mycli.instanceRepository.UpdateConnected(mycli.Instance.Id, mycli.Instance.Connected, mycli.Instance.DisconnectReason)
+			err = mycli.instanceRepository.UpdateQrcode(mycli.currentInstance().Id, "")
 			if err != nil {
-				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
-			}
-
-			err = mycli.instanceRepository.UpdateQrcode(mycli.Instance.Id, "")
-			if err != nil {
-				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
+				mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 			}
 		}
 	case *events.PairSuccess:
@@ -1253,7 +1191,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] ===== MESSAGE RECEIVED ===== ID: %s, From: %s, Type: %s, Size: %s", mycli.userID, evt.Info.ID, evt.Info.Chat.String(), evt.Info.Type, messageSize)
 
 		// se readMessages for true ele marca como lida
-		if mycli.Instance.ReadMessages {
+		if mycli.currentInstance().ReadMessages {
 			messageIDs := []string{evt.Info.ID}
 			err := mycli.WAClient.MarkRead(context.Background(), messageIDs, time.Now(), evt.Info.Sender, evt.Info.Sender)
 			if err != nil {
@@ -1264,12 +1202,12 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 
 		// se ignoreStatus for true e o chat for broadcast ou o id for broadcast retorna
-		if mycli.Instance.IgnoreStatus && (strings.Contains(evt.Info.Chat.String(), "@broadcast") || strings.Contains(evt.Info.ID, "@broadcast")) {
+		if mycli.currentInstance().IgnoreStatus && (strings.Contains(evt.Info.Chat.String(), "@broadcast") || strings.Contains(evt.Info.ID, "@broadcast")) {
 			return
 		}
 
 		// se ignoreGroup for true e o chat for grupo retorna
-		if mycli.Instance.IgnoreGroups && strings.Contains(evt.Info.Chat.String(), "@g.us") {
+		if mycli.currentInstance().IgnoreGroups && strings.Contains(evt.Info.Chat.String(), "@g.us") {
 			return
 		}
 
@@ -1277,18 +1215,18 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// as mesmas exclusões, e só trata texto — mensagens de mídia não abrem
 		// nem avançam conversa.
 		if text := evt.Message.GetConversation(); text != "" {
-			mycli.service.DispatchToTypebot(mycli.Instance, evt.Info.Chat.String(), evt.Info.PushName, text, evt.Info.IsFromMe)
+			mycli.service.DispatchToTypebot(mycli.currentInstance(), evt.Info.Chat.String(), evt.Info.PushName, text, evt.Info.IsFromMe)
 		} else if extended := evt.Message.GetExtendedTextMessage().GetText(); extended != "" {
-			mycli.service.DispatchToTypebot(mycli.Instance, evt.Info.Chat.String(), evt.Info.PushName, extended, evt.Info.IsFromMe)
+			mycli.service.DispatchToTypebot(mycli.currentInstance(), evt.Info.Chat.String(), evt.Info.PushName, extended, evt.Info.IsFromMe)
 		}
 
 		// Verifica advanced settings para ignorar grupos
-		if (mycli.config.EventIgnoreGroup || mycli.Instance.IgnoreGroups) && strings.Contains(evt.Info.Chat.String(), "@g.us") {
+		if (mycli.config.EventIgnoreGroup || mycli.currentInstance().IgnoreGroups) && strings.Contains(evt.Info.Chat.String(), "@g.us") {
 			return
 		}
 
 		// Verifica advanced settings para ignorar status/broadcast
-		if (mycli.config.EventIgnoreStatus || mycli.Instance.IgnoreStatus) && (strings.Contains(evt.Info.Chat.String(), "@broadcast") || strings.Contains(evt.Info.ID, "@broadcast")) {
+		if (mycli.config.EventIgnoreStatus || mycli.currentInstance().IgnoreStatus) && (strings.Contains(evt.Info.Chat.String(), "@broadcast") || strings.Contains(evt.Info.ID, "@broadcast")) {
 			return
 		}
 
@@ -1376,7 +1314,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		}
 
 		// Auto-marca mensagens como lidas se configurado
-		if mycli.Instance.ReadMessages && !evt.Info.IsFromMe {
+		if mycli.currentInstance().ReadMessages && !evt.Info.IsFromMe {
 			go func() {
 				time.Sleep(1 * time.Second) // Pequeno delay para parecer mais natural
 				err := mycli.WAClient.MarkRead(context.Background(), []types.MessageID{evt.Info.ID}, evt.Info.Timestamp, evt.Info.Chat, evt.Info.Sender)
@@ -1498,7 +1436,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 							&evt.Info,
 							decrypted,
 							"", // CompanyID não disponível no MyClient, será vazio
-							mycli.Instance.Id,
+							mycli.currentInstance().Id,
 						)
 
 						// Salvar no banco com timeout de segurança
@@ -1896,13 +1834,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 				},
 				"instanceToken": mycli.token,
 				"instanceId":    mycli.userID,
-				"instanceName":  mycli.Instance.Name,
+				"instanceName":  mycli.currentInstance().Name,
 			}
 
 			buttonClickJSON, err := json.Marshal(buttonClickMap)
 			if err == nil {
 				buttonClickQueue := strings.ToLower(fmt.Sprintf("%s.buttonclick", userID))
-				go mycli.service.CallWebhook(mycli.Instance, buttonClickQueue, buttonClickJSON)
+				go mycli.service.CallWebhook(mycli.currentInstance(), buttonClickQueue, buttonClickJSON)
 				if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
 					go mycli.service.SendToGlobalQueues("ButtonClick", buttonClickJSON, mycli.userID)
 				}
@@ -1916,7 +1854,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postMap["event"] = "Receipt"
 
 		// se ignoreGroup for true e o chat for grupo retorna
-		if mycli.Instance.IgnoreGroups && strings.Contains(evt.Chat.String(), "@g.us") {
+		if mycli.currentInstance().IgnoreGroups && strings.Contains(evt.Chat.String(), "@g.us") {
 			return
 		}
 
@@ -2023,14 +1961,14 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Logged out for reason %s", mycli.userID, evt.Reason.String())
 
 		// Limpar cache de userInfo para esta instância
-		mycli.userInfoCache.Delete(mycli.Instance.Token)
-		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.Instance.Token)
+		mycli.userInfoCache.Delete(mycli.currentInstance().Token)
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.currentInstance().Token)
 
-		mycli.Instance.DisconnectReason = evt.Reason.String()
-		mycli.Instance.Connected = false
-		err := mycli.instanceRepository.UpdateConnected(mycli.Instance.Id, mycli.Instance.Connected, mycli.Instance.DisconnectReason)
+		mycli.currentInstance().DisconnectReason = evt.Reason.String()
+		mycli.currentInstance().Connected = false
+		err := mycli.instanceRepository.UpdateConnected(mycli.currentInstance().Id, mycli.currentInstance().Connected, mycli.currentInstance().DisconnectReason)
 		if err != nil {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 		}
 
 		if postMap["data"] != nil {
@@ -2057,9 +1995,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		dataMap["reason"] = evt.Reason.String()
 
 		// Enviar evento LoggedOut para webhook/RabbitMQ ANTES de matar o canal
-		postMap["instanceToken"] = mycli.Instance.Token
+		postMap["instanceToken"] = mycli.currentInstance().Token
 		postMap["instanceId"] = mycli.userID
-		postMap["instanceName"] = mycli.Instance.Name
+		postMap["instanceName"] = mycli.currentInstance().Name
 
 		values, err := json.Marshal(postMap)
 		if err != nil {
@@ -2073,7 +2011,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] ===== DISPATCHING LOGGEDOUT EVENT ===== Queue: %s", mycli.userID, queueName)
 
 			// Enviar para webhook/RabbitMQ
-			go mycli.service.CallWebhook(mycli.Instance, queueName, values)
+			go mycli.service.CallWebhook(mycli.currentInstance(), queueName, values)
 
 			if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
 				mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Sending LoggedOut to global queues - AMQP: %v, NATS: %v", mycli.userID, mycli.config.AmqpGlobalEnabled, mycli.config.NatsGlobalEnabled)
@@ -2100,17 +2038,17 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postMap["event"] = "CallOffer"
 
 		// Verifica se deve rejeitar chamadas automaticamente
-		if mycli.Instance.RejectCall {
+		if mycli.currentInstance().RejectCall {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Auto-rejecting call from %s", mycli.userID, evt.CallCreator.String())
 
 			// Rejeita a chamada
 			mycli.WAClient.RejectCall(context.Background(), evt.CallCreator, evt.CallID)
 
 			// Envia mensagem de rejeição se configurada
-			if mycli.Instance.MsgRejectCall != "" {
+			if mycli.currentInstance().MsgRejectCall != "" {
 				msg := &waE2E.Message{
 					ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-						Text: &mycli.Instance.MsgRejectCall,
+						Text: &mycli.currentInstance().MsgRejectCall,
 					},
 				}
 
@@ -2150,28 +2088,28 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Connection failed with reason %s", mycli.userID, evt.Reason.String())
 
 		// Limpar cache de userInfo para esta instância
-		mycli.userInfoCache.Delete(mycli.Instance.Token)
-		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.Instance.Token)
+		mycli.userInfoCache.Delete(mycli.currentInstance().Token)
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.currentInstance().Token)
 
-		mycli.Instance.DisconnectReason = evt.Reason.String()
-		mycli.Instance.Connected = false
-		err := mycli.instanceRepository.UpdateConnected(mycli.Instance.Id, mycli.Instance.Connected, mycli.Instance.DisconnectReason)
+		mycli.currentInstance().DisconnectReason = evt.Reason.String()
+		mycli.currentInstance().Connected = false
+		err := mycli.instanceRepository.UpdateConnected(mycli.currentInstance().Id, mycli.currentInstance().Connected, mycli.currentInstance().DisconnectReason)
 		if err != nil {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 		}
 	case *events.Disconnected:
 		doWebhook = true
 		postMap["event"] = "Disconnected"
 
 		// Limpar cache de userInfo para esta instância (mas não para reconexão automática)
-		mycli.userInfoCache.Delete(mycli.Instance.Token)
-		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.Instance.Token)
+		mycli.userInfoCache.Delete(mycli.currentInstance().Token)
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.currentInstance().Token)
 
-		mycli.Instance.DisconnectReason = "Disconnected emitted because the websocket is closed by the server."
-		mycli.Instance.Connected = false
-		err := mycli.instanceRepository.UpdateConnected(mycli.Instance.Id, mycli.Instance.Connected, mycli.Instance.DisconnectReason)
+		mycli.currentInstance().DisconnectReason = "Disconnected emitted because the websocket is closed by the server."
+		mycli.currentInstance().Connected = false
+		err := mycli.instanceRepository.UpdateConnected(mycli.currentInstance().Id, mycli.currentInstance().Connected, mycli.currentInstance().DisconnectReason)
 		if err != nil {
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.Instance.Id, err)
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 		}
 
 		// Trigger instance restart via websocket-capable service (non-blocking)
@@ -2282,7 +2220,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 	if doWebhook {
 		postMap["instanceToken"] = mycli.token
 		postMap["instanceId"] = mycli.userID
-		postMap["instanceName"] = mycli.Instance.Name
+		postMap["instanceName"] = mycli.currentInstance().Name
 
 		values, err := json.Marshal(postMap)
 		if err != nil {
@@ -2304,7 +2242,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		dataSize := len(values)
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] ===== DISPATCHING WEBHOOK ===== Event: %s, Queue: %s, DataSize: %d bytes", mycli.userID, eventType, queueName, dataSize)
 
-		go mycli.service.CallWebhook(mycli.Instance, queueName, values)
+		go mycli.service.CallWebhook(mycli.currentInstance(), queueName, values)
 
 		if mycli.config.AmqpGlobalEnabled || mycli.config.NatsGlobalEnabled {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Sending to global queues - Event: %s, AMQP: %v, NATS: %v", mycli.userID, eventType, mycli.config.AmqpGlobalEnabled, mycli.config.NatsGlobalEnabled)
@@ -2950,7 +2888,9 @@ func (w *whatsmeowService) UpdateInstanceSettings(instanceId string) error {
 	}
 
 	// Atualiza as configurações no MyClient em execução
-	myClient.Instance = instance
+	myClient.setInstance(instance)
+	// alwaysOnline alterado passa a valer já, sem esperar reconectar.
+	myClient.reconcilePresence()
 	myClient.webhookUrl = instance.Webhook
 	myClient.rabbitmqEnable = instance.RabbitmqEnable
 	myClient.natsEnable = instance.NatsEnable
@@ -3011,7 +2951,9 @@ func (w *whatsmeowService) UpdateInstanceAdvancedSettings(instanceId string) err
 	}
 
 	// Atualiza a instância no MyClient com as advanced settings atualizadas
-	myClient.Instance = instance
+	myClient.setInstance(instance)
+	// alwaysOnline alterado passa a valer já, sem esperar reconectar.
+	myClient.reconcilePresence()
 
 	w.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Advanced settings updated in runtime successfully", instanceId)
 	return nil
