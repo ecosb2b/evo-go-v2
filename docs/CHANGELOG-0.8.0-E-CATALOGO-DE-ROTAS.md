@@ -78,6 +78,7 @@ Nenhum campo foi removido; todos os campos novos são opcionais.
 | `GET /instance/qr` | Campo novo | `expiresAt` (unix), `expiresIn` (segundos) | Quando o código vence. O primeiro vale ~60 s e os seguintes ~20 s. Código vencido não é mais devolvido: a rota espera a próxima rotação ou responde `no QR code available`. |
 | `GET /ws` (websocket) | Comportamento | conexões por instância | Várias conexões da mesma instância recebem todos os eventos. Antes a última substituía as anteriores. |
 | `GET /instance/all`, `GET /instance/info/:instanceId` | Campo novo | `needsQr` (bool) | `true` quando a instância está desconectada e só um QR novo resolve (logout pelo celular, logout pela API, janela de QR encerrada, nunca pareada). `false` quando ela volta sozinha ou só precisa de `/instance/connect`. |
+| `GET /instance/all`, `GET /instance/info/:instanceId` | Formato | `qrcode` | O valor gravado agora é `"<imagem>\|<código>\|<expira em unix>"` (o terceiro campo é novo). Para obter o QR, use `GET /instance/qr` (`qrcode`, `code`, `expiresAt`) em vez de separar esta coluna. |
 
 ## Changelog — webhooks, eventos e variáveis de ambiente
 
@@ -106,7 +107,8 @@ Variáveis de ambiente (para quem opera o servidor):
 | Variável | Padrão | Para que serve |
 | --- | --- | --- |
 | `REREQUEST_FROM_PHONE` | `true` | Mensagem recebida que não pôde ser decifrada é pedida de novo ao celular, em vez de descartada. Comum no primeiro contato de um número novo (lead de anúncio). `false` desliga. |
-| `QRCODE_MAX_COUNT` | `7` (antes `5`) | Quantas emissões de QR antes de encerrar a sessão de pareamento. Com 7, a janela vai a ~160 s (antes ~120 s). Valor inválido agora usa o padrão em vez de desligar o limite. |
+| `QRCODE_MAX_COUNT` | `7` (antes `5`) | Quantas emissões de QR antes de encerrar a sessão de pareamento. Com 7, a janela vai a ~160 s (antes ~120 s). Valor inválido agora usa o padrão em vez de desligar o limite. Quem fixou `QRCODE_MAX_COUNT=5` no ambiente deve remover a variável ou trocar para `7`, senão continua com a janela de ~120 s. |
+| `CONNECT_ON_STARTUP` | `false` | Além de religar as instâncias no boot, agora liga a verificação periódica de reconexão (a cada 90 s), que religa instâncias que caíram e ficaram paradas. Com `false`, essa verificação não roda. |
 
 Comportamento novo de presença: com `alwaysOnline=false`, a instância fica online por alguns segundos a cada \~20 horas. Isso evita que o celular desvincule o aparelho por inatividade, sem cortar as notificações.
 
