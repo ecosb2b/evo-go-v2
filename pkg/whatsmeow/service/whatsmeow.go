@@ -176,6 +176,10 @@ type MyClient struct {
 	// Tentativas de recuperação de app state por coleção (appstate_recovery.go).
 	appStateRecoveryMu sync.Mutex
 	appStateRecovery   map[appstate.WAPatchName]appStateRecoveryAttempt
+
+	// Último <stream:error> recebido, consumido pelo Disconnected seguinte.
+	streamErrorMu   sync.Mutex
+	lastStreamError string
 }
 
 func (mycli *MyClient) persistMessageAsync(message message_model.Message) {
@@ -2119,6 +2123,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		if err != nil {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogError("[%s] Error updating instance: %s", mycli.currentInstance().Id, err)
 		}
+	case *events.StreamError:
+		raw := ""
+		if evt.Raw != nil {
+			raw = evt.Raw.String()
+		}
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Stream error from server (code=%q): %s", mycli.userID, evt.Code, raw)
+		mycli.recordStreamError(evt.Code, raw)
 	case *events.Disconnected:
 		doWebhook = true
 		postMap["event"] = "Disconnected"
@@ -2127,7 +2138,7 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		mycli.userInfoCache.Delete(mycli.currentInstance().Token)
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] UserInfo cache cleared for token: %s", mycli.userID, mycli.currentInstance().Token)
 
-		mycli.currentInstance().DisconnectReason = "Disconnected emitted because the websocket is closed by the server."
+		mycli.currentInstance().DisconnectReason = disconnectReason(mycli.takeStreamError())
 		mycli.currentInstance().Connected = false
 		err := mycli.instanceRepository.UpdateConnected(mycli.currentInstance().Id, mycli.currentInstance().Connected, mycli.currentInstance().DisconnectReason)
 		if err != nil {
