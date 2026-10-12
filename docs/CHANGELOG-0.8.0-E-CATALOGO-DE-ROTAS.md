@@ -77,6 +77,7 @@ Nenhum campo foi removido; todos os campos novos são opcionais.
 | `GET /instance/qr` | Comportamento | instância pareada reconectando | Responde `"session already logged in"` em vez de derrubar a conexão para gerar QR. |
 | `GET /instance/qr` | Campo novo | `expiresAt` (unix), `expiresIn` (segundos) | Quando o código vence. O primeiro vale ~60 s e os seguintes ~20 s. Código vencido não é mais devolvido: a rota espera a próxima rotação ou responde `no QR code available`. |
 | `GET /ws` (websocket) | Comportamento | conexões por instância | Várias conexões da mesma instância recebem todos os eventos. Antes a última substituía as anteriores. |
+| `GET /instance/all`, `GET /instance/info/:instanceId` | Campo novo | `needsQr` (bool) | `true` quando a instância está desconectada e só um QR novo resolve (logout pelo celular, logout pela API, janela de QR encerrada, nunca pareada). `false` quando ela volta sozinha ou só precisa de `/instance/connect`. |
 
 ## Changelog — webhooks, eventos e variáveis de ambiente
 

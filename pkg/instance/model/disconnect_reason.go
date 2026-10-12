@@ -41,3 +41,26 @@ func TemporaryBanUntil(reason string) (time.Time, bool) {
 	}
 	return until, true
 }
+
+// requiresQRPrefixes: motivos em que o aparelho foi desvinculado (ou nunca
+// chegou a ser) e só um QR novo resolve. Nesses casos o jid continua gravado,
+// então "tem número" não basta para saber se dá para só reconectar.
+var requiresQRPrefixes = []string{
+	"401:", "403:", "406:",
+	DisconnectReasonLogoutByAPI,
+	"Maximum QR code count",
+	DisconnectReasonQRSocketLost,
+}
+
+// RequiresQR diz se a instância (desconectada) precisa de um QR novo.
+func RequiresQR(jid, reason string) bool {
+	if jid == "" {
+		return true
+	}
+	for _, prefix := range requiresQRPrefixes {
+		if strings.HasPrefix(reason, prefix) {
+			return true
+		}
+	}
+	return false
+}

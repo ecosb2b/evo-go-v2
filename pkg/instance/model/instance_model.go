@@ -33,6 +33,10 @@ type Instance struct {
 	ClientName       string    `json:"client_name"`
 	CreatedAt        time.Time `json:"createdAt" gorm:"autoCreateTime"`
 
+	// NeedsQR é calculado na leitura (não é coluna): desconectada e sem sessão
+	// para retomar — só um QR novo resolve.
+	NeedsQR bool `json:"needsQr" gorm:"-"`
+
 	// Advanced Settings
 	AlwaysOnline  bool   `json:"alwaysOnline" gorm:"default:false"`
 	RejectCall    bool   `json:"rejectCall" gorm:"default:false"`

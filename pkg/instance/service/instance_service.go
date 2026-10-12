@@ -647,6 +647,7 @@ func (i instances) GetAll() ([]*instance_model.Instance, error) {
 		} else {
 			instance.Connected = false
 		}
+		instance.NeedsQR = !instance.Connected && instance_model.RequiresQR(instance.Jid, instance.DisconnectReason)
 
 		instance.Proxy = ""
 	}
@@ -669,6 +670,7 @@ func (i instances) Info(instanceId string) (*instance_model.Instance, error) {
 	} else {
 		instance.Connected = false
 	}
+	instance.NeedsQR = !instance.Connected && instance_model.RequiresQR(instance.Jid, instance.DisconnectReason)
 
 	instance.Proxy = ""
 
