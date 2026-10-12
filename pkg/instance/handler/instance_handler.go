@@ -651,6 +651,10 @@ func (h *instanceHandler) GetAdvancedSettings(c *gin.Context) {
 		return
 	}
 
+	if !authorizeInstanceScope(c, instanceId) {
+		return
+	}
+
 	settings, err := h.instanceService.GetAdvancedSettings(instanceId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -678,6 +682,10 @@ func (h *instanceHandler) UpdateAdvancedSettings(c *gin.Context) {
 
 	if instanceId == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "instanceId is required"})
+		return
+	}
+
+	if !authorizeInstanceScope(c, instanceId) {
 		return
 	}
 

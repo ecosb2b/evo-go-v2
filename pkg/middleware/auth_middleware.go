@@ -11,6 +11,7 @@ import (
 type Middleware interface {
 	Auth(ctx *gin.Context)
 	AuthAdmin(ctx *gin.Context)
+	AuthInstanceOrAdmin(ctx *gin.Context)
 }
 
 type middleware struct {
@@ -34,6 +35,25 @@ func (m middleware) Auth(ctx *gin.Context) {
 	ctx.Set("instance", instance)
 
 	ctx.Next()
+}
+
+// AuthInstanceOrAdmin aceita a Global API Key ou o token de uma instância.
+// Rotas que a usam recebem :instanceId no path e precisam conferir o escopo no
+// handler: com a Global API Key o contexto leva "admin"; com token, "instance".
+func (m middleware) AuthInstanceOrAdmin(ctx *gin.Context) {
+	token := ctx.GetHeader("apikey")
+	if token == "" {
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authorized"})
+		return
+	}
+
+	if token == m.config.GlobalApiKey {
+		ctx.Set("admin", true)
+		ctx.Next()
+		return
+	}
+
+	m.Auth(ctx)
 }
 
 func (m middleware) AuthAdmin(ctx *gin.Context) {
