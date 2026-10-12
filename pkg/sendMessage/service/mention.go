@@ -117,5 +117,48 @@ func setMessageMentionedJIDs(msg *waE2E.Message, messageType string, mentionedJI
 			msg.ContactMessage.ContextInfo = &waE2E.ContextInfo{}
 		}
 		msg.ContactMessage.ContextInfo.MentionedJID = mentionedJIDs
+	// Botões, listas, carrossel e produto descartavam as menções sem aviso.
+	// [upstream#137]
+	case "InteractiveMessage":
+		interactive := msg.InteractiveMessage
+		// O PIX vai embrulhado em ViewOnceMessage.
+		if interactive == nil && msg.ViewOnceMessage != nil && msg.ViewOnceMessage.Message != nil {
+			interactive = msg.ViewOnceMessage.Message.InteractiveMessage
+		}
+		if interactive == nil {
+			return
+		}
+		if interactive.ContextInfo == nil {
+			interactive.ContextInfo = &waE2E.ContextInfo{}
+		}
+		interactive.ContextInfo.MentionedJID = mentionedJIDs
+	case "ListMessage":
+		if msg.ListMessage == nil {
+			return
+		}
+		if msg.ListMessage.ContextInfo == nil {
+			msg.ListMessage.ContextInfo = &waE2E.ContextInfo{}
+		}
+		msg.ListMessage.ContextInfo.MentionedJID = mentionedJIDs
+	case "ButtonsMessage":
+		buttons := msg.ButtonsMessage
+		if buttons == nil && msg.DocumentWithCaptionMessage != nil && msg.DocumentWithCaptionMessage.Message != nil {
+			buttons = msg.DocumentWithCaptionMessage.Message.ButtonsMessage
+		}
+		if buttons == nil {
+			return
+		}
+		if buttons.ContextInfo == nil {
+			buttons.ContextInfo = &waE2E.ContextInfo{}
+		}
+		buttons.ContextInfo.MentionedJID = mentionedJIDs
+	case "ProductMessage":
+		if msg.ProductMessage == nil {
+			return
+		}
+		if msg.ProductMessage.ContextInfo == nil {
+			msg.ProductMessage.ContextInfo = &waE2E.ContextInfo{}
+		}
+		msg.ProductMessage.ContextInfo.MentionedJID = mentionedJIDs
 	}
 }

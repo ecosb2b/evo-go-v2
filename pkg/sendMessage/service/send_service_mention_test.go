@@ -172,3 +172,69 @@ func TestSetMessageMentionedJIDs_DocWithCaptionDoesNotPanic(t *testing.T) {
 		t.Fatal("DocumentMessage should remain nil for captioned documents")
 	}
 }
+
+// Botões, listas, carrossel e produto perdiam as menções sem aviso.
+func TestSetMessageMentionedJIDsInteractiveTypes(t *testing.T) {
+	jids := []string{"5511999999999@s.whatsapp.net"}
+
+	tests := []struct {
+		name        string
+		messageType string
+		msg         *waE2E.Message
+		get         func(*waE2E.Message) []string
+	}{
+		{
+			name:        "interactive",
+			messageType: "InteractiveMessage",
+			msg:         &waE2E.Message{InteractiveMessage: &waE2E.InteractiveMessage{}},
+			get:         func(m *waE2E.Message) []string { return m.GetInteractiveMessage().GetContextInfo().GetMentionedJID() },
+		},
+		{
+			name:        "list",
+			messageType: "ListMessage",
+			msg:         &waE2E.Message{ListMessage: &waE2E.ListMessage{}},
+			get:         func(m *waE2E.Message) []string { return m.GetListMessage().GetContextInfo().GetMentionedJID() },
+		},
+		{
+			name:        "buttons",
+			messageType: "ButtonsMessage",
+			msg:         &waE2E.Message{ButtonsMessage: &waE2E.ButtonsMessage{}},
+			get:         func(m *waE2E.Message) []string { return m.GetButtonsMessage().GetContextInfo().GetMentionedJID() },
+		},
+		{
+			name:        "buttons wrapped in document with caption",
+			messageType: "ButtonsMessage",
+			msg: &waE2E.Message{DocumentWithCaptionMessage: &waE2E.FutureProofMessage{
+				Message: &waE2E.Message{ButtonsMessage: &waE2E.ButtonsMessage{}},
+			}},
+			get: func(m *waE2E.Message) []string {
+				return m.GetDocumentWithCaptionMessage().GetMessage().GetButtonsMessage().GetContextInfo().GetMentionedJID()
+			},
+		},
+		{
+			name:        "product",
+			messageType: "ProductMessage",
+			msg:         &waE2E.Message{ProductMessage: &waE2E.ProductMessage{}},
+			get:         func(m *waE2E.Message) []string { return m.GetProductMessage().GetContextInfo().GetMentionedJID() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setMessageMentionedJIDs(tt.msg, tt.messageType, jids)
+			if got := tt.get(tt.msg); len(got) != 1 || got[0] != jids[0] {
+				t.Fatalf("mentions = %v, want %v", got, jids)
+			}
+		})
+	}
+}
+
+func TestSetMessageMentionedJIDsInteractiveInViewOnce(t *testing.T) {
+	msg := &waE2E.Message{ViewOnceMessage: &waE2E.FutureProofMessage{
+		Message: &waE2E.Message{InteractiveMessage: &waE2E.InteractiveMessage{}},
+	}}
+	setMessageMentionedJIDs(msg, "InteractiveMessage", []string{"5511999999999@s.whatsapp.net"})
+	if got := msg.GetViewOnceMessage().GetMessage().GetInteractiveMessage().GetContextInfo().GetMentionedJID(); len(got) != 1 {
+		t.Fatalf("mentions = %v, want one", got)
+	}
+}
