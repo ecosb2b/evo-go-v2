@@ -2642,6 +2642,10 @@ func (w *whatsmeowService) StartInstance(instanceId string) error {
 }
 
 func (w *whatsmeowService) ConnectOnStartup(clientName string) {
+	// A verificação periódica sobe mesmo se a listagem do boot falhar — ela
+	// própria tenta de novo a cada 90 s.
+	defer w.startReconnectWatchdog(clientName)
+
 	w.loggerWrapper.GetLogger(clientName).LogInfo("Connecting all instances on startup")
 
 	instances, err := w.instanceRepository.GetInstancesToRestore(clientName)
@@ -2674,8 +2678,6 @@ func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 			w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error starting client: %s", clientName, err)
 		}
 	}
-
-	w.startReconnectWatchdog(clientName)
 }
 
 // hasDeviceStore informa se ainda existe sessão do whatsmeow para o jid.
