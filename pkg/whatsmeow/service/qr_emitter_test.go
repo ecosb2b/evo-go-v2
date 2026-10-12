@@ -20,6 +20,7 @@ type publishedQR struct {
 type teardownCall struct {
 	reason      string
 	forceLogout bool
+	count       int
 }
 
 // fakeQREnv simula o runtime para o emissor, sem WhatsApp.
@@ -57,10 +58,10 @@ func (e *fakeQREnv) Publish(code string, count int, expiresAt time.Time) {
 	e.published = append(e.published, publishedQR{code, count, expiresAt})
 }
 
-func (e *fakeQREnv) Teardown(reason string, forceLogout bool) {
+func (e *fakeQREnv) Teardown(reason string, forceLogout bool, count int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.teardowns = append(e.teardowns, teardownCall{reason, forceLogout})
+	e.teardowns = append(e.teardowns, teardownCall{reason, forceLogout, count})
 }
 
 func (e *fakeQREnv) snapshot() ([]publishedQR, []teardownCall) {
@@ -123,7 +124,7 @@ func TestQREmitterPublishesAllCodesThenTearsDown(t *testing.T) {
 	if !published[0].expiresAt.Equal(env.now.Add(fastQRTiming.First)) || !published[1].expiresAt.Equal(env.now.Add(fastQRTiming.Next)) {
 		t.Fatalf("first code must live First and the next ones Next: %+v", published)
 	}
-	if len(teardowns) != 1 || teardowns[0] != (teardownCall{"", false}) {
+	if len(teardowns) != 1 || teardowns[0] != (teardownCall{"", false, 3}) {
 		t.Fatalf("teardowns = %+v, want one plain QR timeout", teardowns)
 	}
 }
@@ -153,7 +154,7 @@ func TestQREmitterTearsDownWhenSocketDrops(t *testing.T) {
 
 	r := waitResult(t, result)
 	published, teardowns := env.snapshot()
-	want := teardownCall{instance_model.DisconnectReasonQRSocketLost, false}
+	want := teardownCall{instance_model.DisconnectReasonQRSocketLost, false, 1}
 	if r.end != qrEndSocketLost || len(published) != 1 || len(teardowns) != 1 || teardowns[0] != want {
 		t.Fatalf("end=%v published=%d teardowns=%+v", r.end, len(published), teardowns)
 	}
@@ -192,7 +193,7 @@ func TestQREmitterMaxCount(t *testing.T) {
 	r := waitResult(t, runAsync(env, []string{"a", "b", "c"}, 0))
 
 	published, teardowns := env.snapshot()
-	want := teardownCall{"Maximum QR code count (2) reached", true}
+	want := teardownCall{"Maximum QR code count (2) reached", true, 2}
 	if r.end != qrEndMaxCount || len(published) != 1 || len(teardowns) != 1 || teardowns[0] != want {
 		t.Fatalf("end=%v published=%+v teardowns=%+v", r.end, published, teardowns)
 	}
@@ -234,6 +235,15 @@ func TestRotateADVSecretRewritesFromCurrentCode(t *testing.T) {
 	}
 	if codes[1] != "b,OLD" {
 		t.Fatal("rotateADVSecret must not modify its input")
+	}
+}
+
+// Sem chave antiga não há o que trocar: os códigos saem intactos.
+func TestRotateADVSecretIgnoresEmptyOldSecret(t *testing.T) {
+	codes := []string{"a,OLD", "b,OLD"}
+	got := rotateADVSecret(codes, 0, "", "NEW")
+	if len(got) != 2 || got[0] != "a,OLD" || got[1] != "b,OLD" {
+		t.Fatalf("got %v, want codes unchanged", got)
 	}
 }
 

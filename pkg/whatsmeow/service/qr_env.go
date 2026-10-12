@@ -42,7 +42,9 @@ func (e qrEnv) Now() time.Time { return time.Now() }
 
 func (e qrEnv) Rotations() <-chan *events.RotateADVSecret { return e.mycli.qrRotate }
 
-func (e qrEnv) Teardown(reason string, forceLogout bool) {
+// Teardown grava a contagem atual antes de derrubar, para o QRTimeout sair
+// com o qrcount certo (o laço só devolve a contagem depois de terminar).
+func (e qrEnv) Teardown(reason string, forceLogout bool, count int) {
 	mycli := e.mycli
 	if forceLogout && mycli.WAClient != nil && mycli.WAClient.IsConnected() {
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] %s, forcing logout and QRTimeout", mycli.userID, reason)
@@ -50,6 +52,7 @@ func (e qrEnv) Teardown(reason string, forceLogout bool) {
 			mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] Error during forced logout: %v", mycli.userID, err)
 		}
 	}
+	mycli.qrcodeCount = count
 	mycli.teardownQR(reason, forceLogout)
 }
 

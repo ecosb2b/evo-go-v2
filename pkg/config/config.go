@@ -393,7 +393,7 @@ func Load() *Config {
 		EventIgnoreGroup:     eventIgnoreGroup == "true",
 		EventIgnoreStatus:    eventIgnoreStatus == "true",
 		QrcodeMaxCount:       qrMaxCount,
-		CheckUserExists:      checkUserExists != "false", // Default true, set to false to disable
+		CheckUserExists:      checkUserExists != "false",    // Default true, set to false to disable
 		RerequestFromPhone:   rerequestFromPhone != "false", // Default true, set to false to disable
 		AmqpGlobalEvents:     amqpGlobalEvents,
 		AmqpSpecificEvents:   amqpSpecificEvents,

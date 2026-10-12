@@ -169,18 +169,18 @@ type MyClient struct {
 	qrcodeCount        int
 	// runtimeDone fecha quando o StartClient deste runtime termina; o emissor
 	// de QR usa para não sobreviver ao runtime que o criou.
-	runtimeDone        chan struct{}
-	runtimeStopOnce    sync.Once
+	runtimeDone     chan struct{}
+	runtimeStopOnce sync.Once
 	// qrRotate leva as trocas da chave ADV (events.RotateADVSecret) ao emissor
 	// de QR deste runtime.
-	qrRotate           chan *events.RotateADVSecret
+	qrRotate chan *events.RotateADVSecret
 	// runtimeKill é o kill channel deste runtime. O mapa killChannel é por
 	// instância e, depois de um restart, aponta para o runtime novo.
 	runtimeKill chan bool
 	// qrEnded marca que o runtime está parando porque a janela de QR acabou sem
 	// scan: não é logout e não pode sair como LoggedOut.
-	qrEnded atomic.Bool
-	passkeyCeremony    *ceremony.Store
+	qrEnded         atomic.Bool
+	passkeyCeremony *ceremony.Store
 
 	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
 	// de presença; presenceGen invalida as de uma configuração anterior.
@@ -815,17 +815,6 @@ func (mycli *MyClient) handleQRCodes(codes []string) {
 	}()
 }
 
-// teardownQR clears the QR state and emits a QRTimeout event, then signals the
-// kill channel so StartClient's select loop performs the actual disconnect and
-// map cleanup. IMPORTANT: this method must NOT delete from the shared
-// clientPointer/myClientPointer/killChannel maps itself — those are unsynchronized
-// service-wide maps and this runs in the handleQRCodes goroutine; doing the
-// delete()s here (concurrent with other instances' goroutines and the whatsmeow
-// dispatch) risks a `fatal error: concurrent map writes`. The kill-channel send
-// is blocking (like the original GetQRChannel timeout branch) so the signal is
-// never dropped and the socket can't be orphaned. Cleanup happens in the
-// StartClient goroutine, the single writer of those maps for this instance.
-// If reason is non-empty it is included in the QRTimeout payload (max-count path).
 // signalRuntimeKill encerra o runtime deste MyClient sem bloquear.
 func (mycli *MyClient) signalRuntimeKill() {
 	if mycli.runtimeKill == nil {
@@ -844,6 +833,17 @@ func shouldAnnounceLoggedOut(restarting, qrEnded bool) bool {
 	return !restarting && !qrEnded
 }
 
+// teardownQR clears the QR state and emits a QRTimeout event, then marks
+// qrEnded and signals this runtime's own kill channel (signalRuntimeKill) so
+// StartClient's select loop performs the actual disconnect and map cleanup.
+// IMPORTANT: this method must NOT delete from the shared
+// clientPointer/myClientPointer/killChannel maps itself — those are unsynchronized
+// service-wide maps and this runs in the handleQRCodes goroutine; doing the
+// delete()s here (concurrent with other instances' goroutines and the whatsmeow
+// dispatch) risks a `fatal error: concurrent map writes`. The signal is
+// buffered and non-blocking, so repeated teardowns are idempotent; qrEnded
+// keeps the resulting kill from being announced as LoggedOut.
+// If reason is non-empty it is included in the QRTimeout payload (max-count path).
 func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 	instanceID := mycli.userID
 

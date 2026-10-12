@@ -22,8 +22,9 @@ type qrEmitterEnv interface {
 	Publish(code string, count int, expiresAt time.Time)
 	// MaxCount é o QRCODE_MAX_COUNT (0 = sem limite).
 	MaxCount() int
-	// Teardown limpa o QR, emite QRTimeout e encerra ESTE runtime.
-	Teardown(reason string, forceLogout bool)
+	// Teardown limpa o QR, emite QRTimeout (com a contagem atual) e encerra
+	// ESTE runtime.
+	Teardown(reason string, forceLogout bool, count int)
 	Now() time.Time
 	// Rotations entrega as trocas da chave ADV feitas durante o pareamento.
 	Rotations() <-chan *events.RotateADVSecret
@@ -54,13 +55,13 @@ const (
 // a nova contagem volta junto com o motivo do fim.
 func runQREmitter(env qrEmitterEnv, codes []string, count int, timing qrTiming) (qrEmitterEnd, int) {
 	for i := 0; i < len(codes); i++ {
-		if end, done := qrCheck(env); done {
+		if end, done := qrCheck(env, count); done {
 			return end, count
 		}
 
 		count++
 		if max := env.MaxCount(); max > 0 && count >= max {
-			env.Teardown(fmt.Sprintf("Maximum QR code count (%d) reached", max), true)
+			env.Teardown(fmt.Sprintf("Maximum QR code count (%d) reached", max), true, count)
 			return qrEndMaxCount, count
 		}
 
@@ -76,7 +77,7 @@ func runQREmitter(env qrEmitterEnv, codes []string, count int, timing qrTiming) 
 			codes = rotateADVSecret(codes, current, rot.OldSecret, rot.NewSecret)
 			env.Publish(codes[current], count, expiresAt)
 		}
-		if end, done := qrWait(env, lifetime, timing.Poll, onRotate); done {
+		if end, done := qrWait(env, lifetime, timing.Poll, count, onRotate); done {
 			return end, count
 		}
 	}
@@ -84,12 +85,12 @@ func runQREmitter(env qrEmitterEnv, codes []string, count int, timing qrTiming) 
 	if env.Paired() || env.PasskeyActive() {
 		return qrEndPaired, count
 	}
-	env.Teardown("", false)
+	env.Teardown("", false, count)
 	return qrEndExhausted, count
 }
 
 // qrCheck vê se algo encerra a emissão agora.
-func qrCheck(env qrEmitterEnv) (qrEmitterEnd, bool) {
+func qrCheck(env qrEmitterEnv, count int) (qrEmitterEnd, bool) {
 	select {
 	case <-env.Stopped():
 		return qrEndStopped, true
@@ -101,7 +102,7 @@ func qrCheck(env qrEmitterEnv) (qrEmitterEnd, bool) {
 		return qrEndPaired, true
 	}
 	if !env.Connected() {
-		env.Teardown(instance_model.DisconnectReasonQRSocketLost, false)
+		env.Teardown(instance_model.DisconnectReasonQRSocketLost, false, count)
 		return qrEndSocketLost, true
 	}
 	return 0, false
@@ -109,7 +110,7 @@ func qrCheck(env qrEmitterEnv) (qrEmitterEnd, bool) {
 
 // qrWait espera a validade do código atual, conferindo o runtime e o socket a
 // cada poll. done=true quando a emissão acabou durante a espera.
-func qrWait(env qrEmitterEnv, lifetime, poll time.Duration, onRotate func(*events.RotateADVSecret)) (qrEmitterEnd, bool) {
+func qrWait(env qrEmitterEnv, lifetime, poll time.Duration, count int, onRotate func(*events.RotateADVSecret)) (qrEmitterEnd, bool) {
 	deadline := time.NewTimer(lifetime)
 	defer deadline.Stop()
 	ticker := time.NewTicker(poll)
@@ -126,7 +127,7 @@ func qrWait(env qrEmitterEnv, lifetime, poll time.Duration, onRotate func(*event
 				onRotate(rot)
 			}
 		case <-ticker.C:
-			if end, done := qrCheck(env); done {
+			if end, done := qrCheck(env, count); done {
 				return end, true
 			}
 		}
@@ -136,6 +137,10 @@ func qrWait(env qrEmitterEnv, lifetime, poll time.Duration, onRotate func(*event
 // rotateADVSecret troca a chave ADV antiga pela nova do código atual em diante,
 // como o qrchan nativo do whatsmeow faz. Os códigos já exibidos não importam.
 func rotateADVSecret(codes []string, from int, oldSecret, newSecret string) []string {
+	// Sem chave antiga, Replace colaria a nova no começo de cada código.
+	if oldSecret == "" {
+		return append([]string(nil), codes...)
+	}
 	out := append([]string(nil), codes...)
 	for i := from; i < len(out); i++ {
 		out[i] = strings.Replace(out[i], oldSecret, newSecret, 1)
