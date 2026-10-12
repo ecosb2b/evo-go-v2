@@ -383,87 +383,21 @@ type MessageSendStruct struct {
 	MessageContextInfo *waE2E.ContextInfo
 }
 
+// ensureClientConnected devolve o cliente pronto para enviar. Não inicia nem
+// reinicia a instância: antes, cada envio para uma instância caída chamava
+// ReconnectClient com esperas fixas (até ~80s por requisição) e chegava a
+// subir runtime de QR para instâncias nunca pareadas. Reconectar é papel do
+// supervisor; aqui só se espera ele terminar, por no máximo alguns segundos.
 func (s *sendService) ensureClientConnected(instanceId string) (*whatsmeow.Client, error) {
-	whatsmeow_service.ClientMapsMu.RLock()
-	client := s.clientPointer[instanceId]
-	whatsmeow_service.ClientMapsMu.RUnlock()
-	s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking client connection status - Client exists: %v", instanceId, client != nil)
-
-	if client == nil {
-		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] No client found, attempting to start new instance", instanceId)
-		err := s.whatsmeowService.StartInstance(instanceId)
-		if err != nil {
-			s.loggerWrapper.GetLogger(instanceId).LogError("[%s] Failed to start instance: %v", instanceId, err)
-			return nil, errors.New("no active session found")
-		}
-
-		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Instance started, waiting 2 seconds...", instanceId)
-		time.Sleep(2 * time.Second)
-
-		whatsmeow_service.ClientMapsMu.RLock()
-		client = s.clientPointer[instanceId]
-		whatsmeow_service.ClientMapsMu.RUnlock()
-		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Checking new client - Exists: %v, Connected: %v",
-			instanceId,
-			client != nil,
-			client != nil && client.IsConnected())
-
-		if client == nil || !client.IsConnected() {
-			s.loggerWrapper.GetLogger(instanceId).LogError("[%s] New client validation failed - Exists: %v, Connected: %v",
-				instanceId,
-				client != nil,
-				client != nil && client.IsConnected())
-			return nil, errors.New("no active session found")
-		}
-	} else if !client.IsConnected() {
-		s.loggerWrapper.GetLogger(instanceId).LogError("[%s] Existing client is disconnected - Connected status: %v",
-			instanceId,
-			client.IsConnected())
-		return nil, errors.New("client disconnected")
-	}
-
-	s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Client successfully validated - Connected: %v", instanceId, client.IsConnected())
-	return client, nil
+	return s.whatsmeowService.ConnectedClient(instanceId)
 }
 
-// ensureClientConnectedWithRetry attempts to ensure client connection with automatic reconnection and retry
-func (s *sendService) ensureClientConnectedWithRetry(instanceId string, maxRetries int) (*whatsmeow.Client, error) {
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Connection attempt %d/%d", instanceId, attempt, maxRetries)
-
-		client, err := s.ensureClientConnected(instanceId)
-		if err == nil {
-			return client, nil
-		}
-
-		// Check if it's a disconnection error that we can retry
-		if err.Error() == "client disconnected" || err.Error() == "no active session found" {
-			s.loggerWrapper.GetLogger(instanceId).LogWarn("[%s] Client disconnected on attempt %d/%d, attempting reconnection...", instanceId, attempt, maxRetries)
-
-			// Attempt to reconnect the client
-			reconnectErr := s.whatsmeowService.ReconnectClient(instanceId)
-			if reconnectErr != nil {
-				s.loggerWrapper.GetLogger(instanceId).LogError("[%s] Failed to reconnect client on attempt %d: %v", instanceId, attempt, reconnectErr)
-			} else {
-				s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Reconnection initiated on attempt %d, waiting 3 seconds...", instanceId, attempt)
-				time.Sleep(3 * time.Second)
-			}
-
-			// If this is not the last attempt, continue to retry
-			if attempt < maxRetries {
-				waitTime := time.Duration(attempt*2) * time.Second // Progressive backoff
-				s.loggerWrapper.GetLogger(instanceId).LogInfo("[%s] Waiting %v before retry attempt %d", instanceId, waitTime, attempt+1)
-				time.Sleep(waitTime)
-				continue
-			}
-		}
-
-		// If it's the last attempt or a non-retryable error, return the error
-		s.loggerWrapper.GetLogger(instanceId).LogError("[%s] Failed to ensure client connection after %d attempts: %v", instanceId, attempt, err)
-		return nil, err
-	}
-
-	return nil, fmt.Errorf("failed to connect client after %d attempts", maxRetries)
+// isConnectionDrop indica que o socket caiu no meio do envio; vale tentar de
+// novo, pois ensureClientConnected espera o supervisor religar.
+func isConnectionDrop(err error) bool {
+	return errors.Is(err, whatsmeow.ErrNotConnected) ||
+		errors.Is(err, whatsmeow_service.ErrInstanceNotConnected) ||
+		strings.Contains(err.Error(), "websocket not connected")
 }
 
 func validateMessageFields(phone string, formatJid *bool, messageID *string, participant *string) (types.JID, error) {
@@ -535,7 +469,7 @@ func (s *sendService) validateAndCheckUserExists(phone string, formatJid *bool, 
 	// Get the client to check if user exists on WhatsApp
 	client, err := s.ensureClientConnected(instance.Id)
 	if err != nil {
-		return types.NewJID("", types.DefaultUserServer), fmt.Errorf("failed to connect client: %v", err)
+		return types.NewJID("", types.DefaultUserServer), fmt.Errorf("failed to connect client: %w", err)
 	}
 
 	// Use CheckUser approach: formatJid=false by default
@@ -617,12 +551,9 @@ func (s *sendService) sendTextWithRetry(data *TextStruct, instance *instance_mod
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] SendText attempt %d/%d", instance.Id, attempt, maxRetries)
 
-		_, err := s.ensureClientConnectedWithRetry(instance.Id, 2)
+		_, err := s.ensureClientConnected(instance.Id)
 		if err != nil {
-			if attempt == maxRetries {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 
 		msg := &waE2E.Message{
@@ -644,7 +575,7 @@ func (s *sendService) sendTextWithRetry(data *TextStruct, instance *instance_mod
 
 		if err != nil {
 			// Check if it's a client disconnection error
-			if strings.Contains(err.Error(), "client disconnected") || strings.Contains(err.Error(), "no active session") {
+			if isConnectionDrop(err) {
 				s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] SendText failed due to disconnection on attempt %d/%d: %v", instance.Id, attempt, maxRetries, err)
 				if attempt < maxRetries {
 					waitTime := time.Duration(attempt) * time.Second
@@ -722,12 +653,9 @@ func (s *sendService) sendLinkWithRetry(data *LinkStruct, instance *instance_mod
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] SendLink attempt %d/%d", instance.Id, attempt, maxRetries)
 
-		_, err := s.ensureClientConnectedWithRetry(instance.Id, 2)
+		_, err := s.ensureClientConnected(instance.Id)
 		if err != nil {
-			if attempt == maxRetries {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 
 		matchedText := findURL(data.Text)
@@ -783,7 +711,7 @@ func (s *sendService) sendLinkWithRetry(data *LinkStruct, instance *instance_mod
 
 		if err != nil {
 			// Check if it's a client disconnection error
-			if strings.Contains(err.Error(), "client disconnected") || strings.Contains(err.Error(), "no active session") {
+			if isConnectionDrop(err) {
 				s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] SendLink failed due to disconnection on attempt %d/%d: %v", instance.Id, attempt, maxRetries, err)
 				if attempt < maxRetries {
 					waitTime := time.Duration(attempt) * time.Second
@@ -959,12 +887,9 @@ func (s *sendService) sendMediaFileWithRetry(data *MediaStruct, fileData []byte,
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] SendMediaFile attempt %d/%d", instance.Id, attempt, maxRetries)
 
-		client, err := s.ensureClientConnectedWithRetry(instance.Id, 2)
+		client, err := s.ensureClientConnected(instance.Id)
 		if err != nil {
-			if attempt == maxRetries {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 
 		mime, _ := mimetype.DetectReader(bytes.NewReader(fileData))
@@ -1208,7 +1133,7 @@ func (s *sendService) sendMediaFileWithRetry(data *MediaStruct, fileData []byte,
 
 		if err != nil {
 			// Check if it's a client disconnection error
-			if strings.Contains(err.Error(), "client disconnected") || strings.Contains(err.Error(), "no active session") {
+			if isConnectionDrop(err) {
 				s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] SendMediaFile failed due to disconnection on attempt %d/%d: %v", instance.Id, attempt, maxRetries, err)
 				if attempt < maxRetries {
 					waitTime := time.Duration(attempt) * time.Second
@@ -1236,12 +1161,9 @@ func (s *sendService) sendMediaUrlWithRetry(data *MediaStruct, instance *instanc
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] SendMediaUrl attempt %d/%d for URL: %s", instance.Id, attempt, maxRetries, data.Url)
 		startTime := time.Now()
 
-		client, err := s.ensureClientConnectedWithRetry(instance.Id, 2)
+		client, err := s.ensureClientConnected(instance.Id)
 		if err != nil {
-			if attempt == maxRetries {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Iniciando download da URL: %s", instance.Id, data.Url)
@@ -1513,7 +1435,7 @@ func (s *sendService) sendMediaUrlWithRetry(data *MediaStruct, instance *instanc
 
 		if err != nil {
 			// Check if it's a client disconnection error
-			if strings.Contains(err.Error(), "client disconnected") || strings.Contains(err.Error(), "no active session") {
+			if isConnectionDrop(err) {
 				s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] SendMediaUrl failed due to disconnection on attempt %d/%d: %v", instance.Id, attempt, maxRetries, err)
 				if attempt < maxRetries {
 					waitTime := time.Duration(attempt) * time.Second
@@ -1544,12 +1466,9 @@ func (s *sendService) sendPollWithRetry(data *PollStruct, instance *instance_mod
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] SendPoll attempt %d/%d", instance.Id, attempt, maxRetries)
 
-		client, err := s.ensureClientConnectedWithRetry(instance.Id, 2)
+		client, err := s.ensureClientConnected(instance.Id)
 		if err != nil {
-			if attempt == maxRetries {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 
 		msg := client.BuildPollCreation(data.Question, data.Options, data.MaxAnswer)
@@ -1566,7 +1485,7 @@ func (s *sendService) sendPollWithRetry(data *PollStruct, instance *instance_mod
 
 		if err != nil {
 			// Check if it's a client disconnection error
-			if strings.Contains(err.Error(), "client disconnected") || strings.Contains(err.Error(), "no active session") {
+			if isConnectionDrop(err) {
 				s.loggerWrapper.GetLogger(instance.Id).LogWarn("[%s] SendPoll failed due to disconnection on attempt %d/%d: %v", instance.Id, attempt, maxRetries, err)
 				if attempt < maxRetries {
 					waitTime := time.Duration(attempt) * time.Second

@@ -2,6 +2,7 @@ package send_handler
 
 import (
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 	send_service "github.com/evolution-foundation/evolution-go/pkg/sendMessage/service"
+	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -72,7 +74,7 @@ func (s *sendHandler) SendText(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendText(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -118,7 +120,7 @@ func (s *sendHandler) SendLink(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendLink(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -230,7 +232,7 @@ func (s *sendHandler) SendMedia(ctx *gin.Context) {
 		// Pass fileBytes to the send service
 		message, err := s.sendMessageService.SendMediaFile(data, fileBytes, instance)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeSendError(ctx, err)
 			return
 		}
 
@@ -270,13 +272,13 @@ func (s *sendHandler) SendMedia(ctx *gin.Context) {
 			}
 			message, err = s.sendMessageService.SendMediaFile(data, fileBytes, instance)
 			if err != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				writeSendError(ctx, err)
 				return
 			}
 		} else {
 			message, err = s.sendMessageService.SendMediaUrl(data, instance)
 			if err != nil {
-				ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				writeSendError(ctx, err)
 				return
 			}
 		}
@@ -329,7 +331,7 @@ func (s *sendHandler) SendPoll(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendPoll(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -375,7 +377,7 @@ func (s *sendHandler) SendSticker(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendSticker(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -436,7 +438,7 @@ func (s *sendHandler) SendLocation(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendLocation(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -487,7 +489,7 @@ func (s *sendHandler) SendContact(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendContact(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -553,7 +555,7 @@ func (s *sendHandler) SendButton(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendButton(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -620,7 +622,7 @@ func (s *sendHandler) SendList(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendList(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -681,7 +683,7 @@ func (s *sendHandler) SendCarousel(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendCarousel(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -722,7 +724,7 @@ func (s *sendHandler) SendStatusText(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendStatusText(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -798,7 +800,7 @@ func (s *sendHandler) SendStatusMedia(ctx *gin.Context) {
 
 		message, err := s.sendMessageService.SendStatusMediaFile(data, fileBytes, instance)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeSendError(ctx, err)
 			return
 		}
 
@@ -824,7 +826,7 @@ func (s *sendHandler) SendStatusMedia(ctx *gin.Context) {
 
 	message, err := s.sendMessageService.SendStatusMediaUrl(data, instance)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeSendError(ctx, err)
 		return
 	}
 
@@ -837,4 +839,14 @@ func NewSendHandler(
 	return &sendHandler{
 		sendMessageService: sendMessageService,
 	}
+}
+
+// writeSendError responde 409 quando a instância não está conectada, para o
+// cliente distinguir "reconecte a instância" de uma falha do envio em si.
+func writeSendError(ctx *gin.Context, err error) {
+	if errors.Is(err, whatsmeow_service.ErrInstanceNotConnected) {
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }

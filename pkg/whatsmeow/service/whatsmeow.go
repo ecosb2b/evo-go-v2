@@ -65,6 +65,9 @@ type WhatsmeowService interface {
 	DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool)
 	ReconnectClient(instanceId string) error
 	ScheduleReconnect(instanceId string)
+	// ConnectedClient devolve o cliente pronto para enviar ou
+	// ErrInstanceNotConnected, sem iniciar nem reiniciar a instância.
+	ConnectedClient(instanceId string) (*whatsmeow.Client, error)
 	ClearInstanceCache(instanceId string, token string) error
 	CallWebhook(instance *instance_model.Instance, queueName string, jsonData []byte)
 	// SendOperationalEvent publica um evento de operação — hoje só a pausa
