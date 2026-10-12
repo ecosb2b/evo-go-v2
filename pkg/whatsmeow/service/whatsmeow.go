@@ -167,6 +167,9 @@ type MyClient struct {
 	// de QR usa para não sobreviver ao runtime que o criou.
 	runtimeDone        chan struct{}
 	runtimeStopOnce    sync.Once
+	// qrRotate leva as trocas da chave ADV (events.RotateADVSecret) ao emissor
+	// de QR deste runtime.
+	qrRotate           chan *events.RotateADVSecret
 	passkeyCeremony    *ceremony.Store
 
 	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
@@ -593,6 +596,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		loggerWrapper:      w.loggerWrapper,
 		qrcodeCount:        0,
 		runtimeDone:        make(chan struct{}),
+		qrRotate:           make(chan *events.RotateADVSecret, 4),
 		passkeyCeremony:    w.passkeyCeremony,
 	}
 
@@ -856,6 +860,16 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		// New-device pairing emits QR codes here (we connect without GetQRChannel
 		// so the socket survives a passkey ceremony). Forward + rotate them.
 		mycli.handleQRCodes(evt.Codes)
+		return
+	case *events.RotateADVSecret:
+		// O WhatsApp trocou a chave ADV no meio do pareamento: os QRs já
+		// emitidos levam a antiga e todo scan falharia. O emissor reescreve.
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] ADV secret rotated during pairing — rewriting QR codes", mycli.userID)
+		select {
+		case mycli.qrRotate <- evt:
+		default:
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogWarn("[%s] ADV secret rotation dropped: QR emitter is not reading", mycli.userID)
+		}
 		return
 	case *events.AppStateSyncError:
 		mycli.handleAppStateSyncError(evt)

@@ -2,7 +2,10 @@ package whatsmeow_service
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"go.mau.fi/whatsmeow/types/events"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 )
@@ -22,6 +25,8 @@ type qrEmitterEnv interface {
 	// Teardown limpa o QR, emite QRTimeout e encerra ESTE runtime.
 	Teardown(reason string, forceLogout bool)
 	Now() time.Time
+	// Rotations entrega as trocas da chave ADV feitas durante o pareamento.
+	Rotations() <-chan *events.RotateADVSecret
 }
 
 type qrTiming struct {
@@ -63,9 +68,15 @@ func runQREmitter(env qrEmitterEnv, codes []string, count int, timing qrTiming) 
 		if i == 0 {
 			lifetime = timing.First
 		}
-		env.Publish(codes[i], count, env.Now().Add(lifetime))
+		expiresAt := env.Now().Add(lifetime)
+		env.Publish(codes[i], count, expiresAt)
 
-		if end, done := qrWait(env, lifetime, timing.Poll); done {
+		current := i
+		onRotate := func(rot *events.RotateADVSecret) {
+			codes = rotateADVSecret(codes, current, rot.OldSecret, rot.NewSecret)
+			env.Publish(codes[current], count, expiresAt)
+		}
+		if end, done := qrWait(env, lifetime, timing.Poll, onRotate); done {
 			return end, count
 		}
 	}
@@ -98,7 +109,7 @@ func qrCheck(env qrEmitterEnv) (qrEmitterEnd, bool) {
 
 // qrWait espera a validade do código atual, conferindo o runtime e o socket a
 // cada poll. done=true quando a emissão acabou durante a espera.
-func qrWait(env qrEmitterEnv, lifetime, poll time.Duration) (qrEmitterEnd, bool) {
+func qrWait(env qrEmitterEnv, lifetime, poll time.Duration, onRotate func(*events.RotateADVSecret)) (qrEmitterEnd, bool) {
 	deadline := time.NewTimer(lifetime)
 	defer deadline.Stop()
 	ticker := time.NewTicker(poll)
@@ -110,10 +121,24 @@ func qrWait(env qrEmitterEnv, lifetime, poll time.Duration) (qrEmitterEnd, bool)
 			return 0, false
 		case <-env.Stopped():
 			return qrEndStopped, true
+		case rot := <-env.Rotations():
+			if rot != nil {
+				onRotate(rot)
+			}
 		case <-ticker.C:
 			if end, done := qrCheck(env); done {
 				return end, true
 			}
 		}
 	}
+}
+
+// rotateADVSecret troca a chave ADV antiga pela nova do código atual em diante,
+// como o qrchan nativo do whatsmeow faz. Os códigos já exibidos não importam.
+func rotateADVSecret(codes []string, from int, oldSecret, newSecret string) []string {
+	out := append([]string(nil), codes...)
+	for i := from; i < len(out); i++ {
+		out[i] = strings.Replace(out[i], oldSecret, newSecret, 1)
+	}
+	return out
 }

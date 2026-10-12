@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow/types/events"
+
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 )
 
@@ -31,10 +33,11 @@ type fakeQREnv struct {
 	now       time.Time
 	published []publishedQR
 	teardowns []teardownCall
+	rotations chan *events.RotateADVSecret
 }
 
 func newFakeQREnv() *fakeQREnv {
-	env := &fakeQREnv{stopped: make(chan struct{}), now: time.Unix(1000, 0)}
+	env := &fakeQREnv{stopped: make(chan struct{}), now: time.Unix(1000, 0), rotations: make(chan *events.RotateADVSecret, 4)}
 	env.connected.Store(true)
 	return env
 }
@@ -45,6 +48,8 @@ func (e *fakeQREnv) Paired() bool             { return e.paired.Load() }
 func (e *fakeQREnv) PasskeyActive() bool      { return e.passkey.Load() }
 func (e *fakeQREnv) MaxCount() int            { return e.maxCount }
 func (e *fakeQREnv) Now() time.Time           { return e.now }
+
+func (e *fakeQREnv) Rotations() <-chan *events.RotateADVSecret { return e.rotations }
 
 func (e *fakeQREnv) Publish(code string, count int, expiresAt time.Time) {
 	e.mu.Lock()
@@ -215,4 +220,40 @@ func TestMarkRuntimeStoppingIsIdempotent(t *testing.T) {
 		t.Fatal("runtimeDone must be closed after the first call")
 	}
 	mycli.markRuntimeStopping() // não pode dar panic (close duplo)
+}
+
+func TestRotateADVSecretRewritesFromCurrentCode(t *testing.T) {
+	codes := []string{"a,OLD", "b,OLD", "c,OLD"}
+	got := rotateADVSecret(codes, 1, "OLD", "NEW")
+
+	want := []string{"a,OLD", "b,NEW", "c,NEW"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+	if codes[1] != "b,OLD" {
+		t.Fatal("rotateADVSecret must not modify its input")
+	}
+}
+
+// O código na tela é republicado com a chave nova (mesma validade) e os
+// próximos já saem trocados.
+func TestQREmitterRepublishesOnADVRotation(t *testing.T) {
+	env := newFakeQREnv()
+	result := runAsync(env, []string{"a,OLD", "b,OLD"}, 0)
+	env.waitPublished(t, 1)
+	env.rotations <- &events.RotateADVSecret{OldSecret: "OLD", NewSecret: "NEW"}
+
+	waitResult(t, result)
+	published, _ := env.snapshot()
+	if len(published) != 3 {
+		t.Fatalf("published = %+v, want original + republished + next", published)
+	}
+	if published[1].code != "a,NEW" || published[1].count != 1 || !published[1].expiresAt.Equal(published[0].expiresAt) {
+		t.Fatalf("republished = %+v, want a,NEW with the same count and expiry", published[1])
+	}
+	if published[2].code != "b,NEW" {
+		t.Fatalf("next code = %q, want b,NEW", published[2].code)
+	}
 }

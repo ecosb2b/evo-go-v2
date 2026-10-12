@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/skip2/go-qrcode"
+	"go.mau.fi/whatsmeow/types/events"
 
 	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
@@ -38,6 +39,8 @@ func (e qrEnv) PasskeyActive() bool {
 
 func (e qrEnv) MaxCount() int  { return e.mycli.config.QrcodeMaxCount }
 func (e qrEnv) Now() time.Time { return time.Now() }
+
+func (e qrEnv) Rotations() <-chan *events.RotateADVSecret { return e.mycli.qrRotate }
 
 func (e qrEnv) Teardown(reason string, forceLogout bool) {
 	mycli := e.mycli
