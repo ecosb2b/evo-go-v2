@@ -99,7 +99,9 @@ func TestReconnectDelayBackoffAndCap(t *testing.T) {
 		{failures: 1, want: 2 * time.Second},
 		{failures: 4, want: 16 * time.Second},
 		{failures: 5, want: 30 * time.Second},
-		{failures: 20, want: 30 * time.Second},
+		{failures: 9, want: 30 * time.Second},
+		{failures: 10, want: 5 * time.Minute},
+		{failures: 40, want: 5 * time.Minute},
 	}
 	for _, test := range tests {
 		if got := reconnectDelay(test.failures, 0); got != test.want {

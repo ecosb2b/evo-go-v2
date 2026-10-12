@@ -18,6 +18,12 @@ const (
 	reconnectBaseDelay = time.Second
 	reconnectMaxDelay  = 30 * time.Second
 	reconnectProbeTime = 30 * time.Second
+
+	// Depois de reconnectLongAfter falhas seguidas, a espera passa a crescer até
+	// reconnectLongMaxDelay: uma instância que não volta não pode bater no
+	// WhatsApp a cada 30 s para sempre.
+	reconnectLongAfter    = 10
+	reconnectLongMaxDelay = 5 * time.Minute
 )
 
 type instanceRuntime struct {
@@ -176,11 +182,15 @@ func reconnectDelay(failures int, jitter float64) time.Duration {
 	if failures < 0 {
 		failures = 0
 	}
+	maxDelay := reconnectMaxDelay
+	if failures >= reconnectLongAfter {
+		maxDelay = reconnectLongMaxDelay
+	}
 	delay := reconnectBaseDelay
-	for attempt := 0; attempt < failures && delay < reconnectMaxDelay; attempt++ {
+	for attempt := 0; attempt < failures && delay < maxDelay; attempt++ {
 		delay *= 2
-		if delay > reconnectMaxDelay {
-			delay = reconnectMaxDelay
+		if delay > maxDelay {
+			delay = maxDelay
 		}
 	}
 	if jitter < 0 {

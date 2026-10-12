@@ -1159,6 +1159,9 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		doWebhook = true
 		postMap["event"] = "ClientOutdated"
 		postMap["data"] = map[string]interface{}{"reason": instance_model.DisconnectReasonClientOutdated}
+		// Um restart busca de novo a versão do WhatsApp Web; a espera longa do
+		// supervisor evita insistir a cada 30 s se a recusa continuar.
+		mycli.service.ScheduleReconnect(mycli.userID)
 	case *events.TemporaryBan:
 		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] User received temporary ban for %s", mycli.userID, evt.Code.String())
 		doWebhook = true
@@ -2671,6 +2674,8 @@ func (w *whatsmeowService) ConnectOnStartup(clientName string) {
 			w.loggerWrapper.GetLogger(clientName).LogError("[%s] Error starting client: %s", clientName, err)
 		}
 	}
+
+	w.startReconnectWatchdog(clientName)
 }
 
 // hasDeviceStore informa se ainda existe sessão do whatsmeow para o jid.
