@@ -110,8 +110,10 @@ export default function InstanceCard({
           )}
         </div>
 
-        {/* Action buttons - hover effect */}
-        <div className="flex border-t border-sidebar-border opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        {/* Action buttons: sempre visíveis no toque (sem hover, ficavam
+            invisíveis mas clicáveis — desconexão acidental); no desktop
+            aparecem no hover ou com foco do teclado. */}
+        <div className="flex border-t border-sidebar-border opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity duration-200">
           {/* Connect/Disconnect Button */}
           {!isConnected && (
             <Button

@@ -1,9 +1,14 @@
-import { LogOut, Moon, Sun, TerminalSquare, BookOpen } from 'lucide-react';
+import { LogOut, Menu, Moon, Sun, TerminalSquare, BookOpen } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import useAuth from '@/hooks/useAuth';
 import { useDarkMode } from '@/hooks/useDarkMode';
 
-function Header() {
+interface HeaderProps {
+  // Abre a sidebar no mobile, onde ela não fica fixa na tela.
+  onMenuClick?: () => void;
+}
+
+function Header({ onMenuClick }: HeaderProps) {
   const { logout, apiUrl } = useAuth();
   const { theme, toggleTheme } = useDarkMode();
 
@@ -17,9 +22,17 @@ function Header() {
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-sidebar-border bg-sidebar px-0 py-3 shadow-sm">
-      {/* Left side - empty space aligned with sidebar width */}
-      <div className="w-56 flex items-center px-4">
-        {/* Empty - logo is in sidebar */}
+      {/* Left side - menu button on mobile; empty space aligned with the sidebar on desktop */}
+      <div className="flex items-center px-4 md:w-56">
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="rounded-md p-2 text-sidebar-foreground hover:bg-sidebar-accent md:hidden dark:text-gray-200"
+            aria-label="Abrir menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Right side */}

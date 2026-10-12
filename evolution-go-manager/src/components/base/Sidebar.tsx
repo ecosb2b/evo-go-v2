@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Smartphone,
+  X,
 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
@@ -10,16 +12,31 @@ const navItems = [
   { to: '/manager/instances', label: 'Instâncias', icon: Smartphone },
 ];
 
-function Sidebar() {
+interface SidebarProps {
+  // Gaveta do mobile: abaixo de md a sidebar fixa some e só aparece por aqui.
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+function SidebarContent({ onNavigate, onClose }: { onNavigate?: () => void; onClose?: () => void }) {
   const currentYear = new Date().getFullYear();
 
   return (
-    <div className="hidden md:flex bg-sidebar text-sidebar-foreground flex-col w-56 border-r border-sidebar-border">
+    <>
       {/* Logo Header */}
-      <div className="h-16 flex items-center px-4 border-b border-sidebar-border">
+      <div className="h-16 flex items-center justify-between px-4 border-b border-sidebar-border">
         <h2 className="text-lg font-bold text-primary">
           Evolution GO
         </h2>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Fechar menu"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Navigation Menu */}
@@ -29,6 +46,7 @@ function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.to === '/manager'}
+            onClick={onNavigate}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-md transition-all',
@@ -55,7 +73,35 @@ function Sidebar() {
           © {currentYear} All rights reserved
         </div>
       </div>
-    </div>
+    </>
+  );
+}
+
+function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
+  useEffect(() => {
+    if (!mobileOpen || !onMobileClose) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onMobileClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen, onMobileClose]);
+
+  return (
+    <>
+      <div className="hidden md:flex bg-sidebar text-sidebar-foreground flex-col w-56 border-r border-sidebar-border">
+        <SidebarContent />
+      </div>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/50" onClick={onMobileClose} />
+          <div className="relative flex w-64 max-w-[80%] flex-col bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+            <SidebarContent onNavigate={onMobileClose} onClose={onMobileClose} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
