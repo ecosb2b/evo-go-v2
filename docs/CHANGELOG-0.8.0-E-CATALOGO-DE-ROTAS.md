@@ -75,6 +75,7 @@ Nenhum campo foi removido; todos os campos novos são opcionais.
 | `POST /instance/disconnect` | Comportamento | eventos assinados | Não apaga mais os eventos assinados (antes os webhooks paravam depois do `/reconnect`). `disconnect_reason` = `"Disconnected by API"`. |
 | `DELETE /instance/logout` | Comportamento | `disconnect_reason` | Passa a ser `"Logged out by API"`. |
 | `GET /instance/qr` | Comportamento | instância pareada reconectando | Responde `"session already logged in"` em vez de derrubar a conexão para gerar QR. |
+| `GET /instance/qr` | Campo novo | `expiresAt` (unix), `expiresIn` (segundos) | Quando o código vence. O primeiro vale ~60 s e os seguintes ~20 s. Código vencido não é mais devolvido: a rota espera a próxima rotação ou responde `no QR code available`. |
 | `GET /ws` (websocket) | Comportamento | conexões por instância | Várias conexões da mesma instância recebem todos os eventos. Antes a última substituía as anteriores. |
 
 ## Changelog — webhooks, eventos e variáveis de ambiente
@@ -313,10 +314,10 @@ Sem cliente rodando: `{"Connected": false, "LoggedIn": false, "Name": ""}`. `Nam
 **Resposta (200) — QR:**
 
 ```json
-{ "message": "success", "data": { "qrcode": "data:image/png;base64,iVBOR...", "code": "2@AbCd...,..." } }
+{ "message": "success", "data": { "qrcode": "data:image/png;base64,iVBOR...", "code": "2@AbCd...,...", "expiresAt": 1792000000, "expiresIn": 54 } }
 ```
 
-`qrcode` = imagem em base64; `code` = string bruta do QR (para gerar a imagem você mesmo).
+`qrcode` = imagem em base64; `code` = string bruta do QR (para gerar a imagem você mesmo); `expiresAt` = validade do código (unix, segundos) e `expiresIn` = segundos que faltam.
 
 **Resposta (200) — passkey em andamento:**
 

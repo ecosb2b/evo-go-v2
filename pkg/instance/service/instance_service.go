@@ -92,6 +92,10 @@ type StatusStruct struct {
 type QrcodeStruct struct {
 	Qrcode string `json:"qrcode"`
 	Code   string `json:"code"`
+	// Validade do código (unix, segundos) e quantos segundos faltam, quando a
+	// EvGo sabe. O primeiro código vale ~60 s e os seguintes ~20 s.
+	ExpiresAt int64 `json:"expiresAt,omitempty"`
+	ExpiresIn int   `json:"expiresIn,omitempty"`
 	// Passkey ceremony fields. Populated when the account requires a WebAuthn
 	// passkey to finish linking (no QR to scan at that point). The manager uses
 	// PasskeyStage to switch its UI and PasskeyOpenUrl for the
@@ -524,34 +528,41 @@ func (i instances) GetQr(instance *instance_model.Instance) (*QrcodeStruct, erro
 		}
 	}
 
-	code := instance.Qrcode
-	if code == "" {
-		// Se não há QR code ainda, aguardar um pouco mais e tentar novamente
-		logger.LogInfo("[%s] No QR code available yet, waiting a bit more...", instance.Id)
+	stored, ok := readFreshQR(instance.Qrcode)
+	if !ok {
+		// Sem QR válido ainda (sessão subindo ou código recém-vencido): espera
+		// a próxima rotação antes de desistir.
+		logger.LogInfo("[%s] No valid QR code yet, waiting a bit more...", instance.Id)
 		time.Sleep(2 * time.Second)
 
 		instance, err = i.instanceRepository.GetInstanceByID(instance.Id)
 		if err != nil {
 			return nil, err
 		}
-
-		code = instance.Qrcode
-		if code == "" {
+		if stored, ok = readFreshQR(instance.Qrcode); !ok {
 			return nil, fmt.Errorf("no QR code available. Please wait a moment and try again")
 		}
 	}
 
-	parts := strings.Split(code, "|")
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid QR code format")
-	}
-
 	qr := &QrcodeStruct{
-		Qrcode: parts[0],
-		Code:   parts[1],
+		Qrcode: stored.Image,
+		Code:   stored.Code,
+	}
+	if !stored.ExpiresAt.IsZero() {
+		qr.ExpiresAt = stored.ExpiresAt.Unix()
+		qr.ExpiresIn = int(time.Until(stored.ExpiresAt).Seconds())
 	}
 
 	return qr, nil
+}
+
+// readFreshQR devolve o QR guardado se ele existir e ainda não tiver vencido.
+func readFreshQR(raw string) (utils.StoredQR, bool) {
+	q, ok := utils.ParseStoredQR(raw)
+	if !ok || q.Expired(time.Now()) {
+		return utils.StoredQR{}, false
+	}
+	return q, true
 }
 
 // buildPasskeyOpenURL builds the URL the manager opens to start the passkey
