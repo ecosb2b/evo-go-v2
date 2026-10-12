@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/image/webp"
@@ -170,6 +171,12 @@ type MyClient struct {
 	// qrRotate leva as trocas da chave ADV (events.RotateADVSecret) ao emissor
 	// de QR deste runtime.
 	qrRotate           chan *events.RotateADVSecret
+	// runtimeKill é o kill channel deste runtime. O mapa killChannel é por
+	// instância e, depois de um restart, aponta para o runtime novo.
+	runtimeKill chan bool
+	// qrEnded marca que o runtime está parando porque a janela de QR acabou sem
+	// scan: não é logout e não pode sair como LoggedOut.
+	qrEnded atomic.Bool
 	passkeyCeremony    *ceremony.Store
 
 	// Presença do runtime (ver presence.go). presenceStop encerra as goroutines
@@ -597,6 +604,7 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 		qrcodeCount:        0,
 		runtimeDone:        make(chan struct{}),
 		qrRotate:           make(chan *events.RotateADVSecret, 4),
+		runtimeKill:        killChan,
 		passkeyCeremony:    w.passkeyCeremony,
 	}
 
@@ -707,6 +715,9 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 
 		select {
 		case <-killChan:
+		case <-mycli.runtimeKill:
+		}
+		{
 			w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("Received kill signal for user '%s'", cd.Instance.Id)
 			mycli.markRuntimeStopping()
 			client.Disconnect()
@@ -733,8 +744,8 @@ func (w *whatsmeowService) StartClient(cd *ClientData) {
 			// Restart do supervisor (reconexão, envio, 66/67) não é logout: o
 			// runtime volta em seguida e emite Connected. Anunciar LoggedOut aqui
 			// fazia o cliente achar que a sessão tinha sido desvinculada.
-			if w.runtimeRestarting(cd.Instance.Id) {
-				w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Runtime stopped for restart; LoggedOut not emitted", cd.Instance.Id)
+			if !shouldAnnounceLoggedOut(w.runtimeRestarting(cd.Instance.Id), mycli.qrEnded.Load()) {
+				w.loggerWrapper.GetLogger(cd.Instance.Id).LogInfo("[%s] Runtime stopped for restart or QR end; LoggedOut not emitted", cd.Instance.Id)
 				return
 			}
 
@@ -799,6 +810,24 @@ func (mycli *MyClient) handleQRCodes(codes []string) {
 // never dropped and the socket can't be orphaned. Cleanup happens in the
 // StartClient goroutine, the single writer of those maps for this instance.
 // If reason is non-empty it is included in the QRTimeout payload (max-count path).
+// signalRuntimeKill encerra o runtime deste MyClient sem bloquear.
+func (mycli *MyClient) signalRuntimeKill() {
+	if mycli.runtimeKill == nil {
+		return
+	}
+	select {
+	case mycli.runtimeKill <- true:
+	default:
+	}
+}
+
+// shouldAnnounceLoggedOut: o kill do runtime só vira LoggedOut num encerramento
+// de verdade — não num restart do supervisor nem no fim de uma janela de QR
+// sem scan (a instância nem chegou a estar logada).
+func shouldAnnounceLoggedOut(restarting, qrEnded bool) bool {
+	return !restarting && !qrEnded
+}
+
 func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 	instanceID := mycli.userID
 
@@ -838,15 +867,8 @@ func (mycli *MyClient) teardownQR(reason string, forceLogout bool) {
 	// maps (it is the single writer for this instance). The buffered, non-blocking
 	// signal makes concurrent teardown requests idempotent.
 	mycli.loggerWrapper.GetLogger(instanceID).LogWarn("[%s] QR timeout — signaling kill channel", instanceID)
-	ClientMapsMu.RLock()
-	killChan, exists := mycli.killChannel[instanceID]
-	ClientMapsMu.RUnlock()
-	if exists {
-		select {
-		case killChan <- true:
-		default:
-		}
-	}
+	mycli.qrEnded.Store(true)
+	mycli.signalRuntimeKill()
 }
 
 func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
