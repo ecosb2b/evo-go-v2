@@ -260,6 +260,25 @@ reenvie, em vez de descartá-la. Comum no primeiro contato de um número novo.
 REREQUEST_FROM_PHONE=true
 ```
 
+### ALLOW_PRIVATE_URLS
+
+Toda URL que a API baixa por conta de quem chama (mídia em `/send/*`, link
+preview, carrossel, produto, foto do grupo, foto do perfil) só pode apontar
+para endereço **público**. Localhost, redes privadas (10.x, 172.16-31.x,
+192.168.x), link-local (169.254.x, inclusive o endereço de metadados da nuvem)
+e faixas reservadas são recusados na hora da conexão — também depois de
+redirects e quando o nome resolve para IP interno. Sem isso, quem tem acesso à
+API faria o servidor acessar a rede interna (SSRF).
+
+Defina `true` só se a mídia vem de um storage na rede interna (ex.: MinIO no
+mesmo docker-compose).
+
+**Padrão**: `false`
+
+```env
+ALLOW_PRIVATE_URLS=false
+```
+
 ### EVENT_IGNORE_GROUP
 
 Ignora eventos originados de grupos.

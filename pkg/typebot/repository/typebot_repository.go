@@ -8,7 +8,9 @@ import (
 type TypebotRepository interface {
 	CreateBot(bot *typebot_model.Typebot) error
 	UpdateBot(bot *typebot_model.Typebot) error
-	DeleteBot(instanceID, id string) error
+	// DeleteBot, DeleteSession e SetSessionStatus devolvem false quando o id não
+	// existe (nesta instância), para o handler responder 404 em vez de 200.
+	DeleteBot(instanceID, id string) (bool, error)
 	GetBotByID(instanceID, id string) (*typebot_model.Typebot, error)
 	GetBotsByInstanceID(instanceID string) ([]typebot_model.Typebot, error)
 	// GetActiveBot devolve o bot que deve atender a instância, ou nil se não
@@ -17,10 +19,10 @@ type TypebotRepository interface {
 
 	CreateSession(session *typebot_model.TypebotSession) error
 	UpdateSession(session *typebot_model.TypebotSession) error
-	DeleteSession(instanceID, id string) error
+	DeleteSession(instanceID, id string) (bool, error)
 	GetSessionByRemoteJid(instanceID, remoteJid string) (*typebot_model.TypebotSession, error)
 	GetSessionsByInstanceID(instanceID string) ([]typebot_model.TypebotSession, error)
-	SetSessionStatus(instanceID, id, status string) error
+	SetSessionStatus(instanceID, id, status string) (bool, error)
 	// SetSessionStatusByRemoteJid muda o status pela chave que quem chama de fora
 	// conhece: o contato. Devolve false quando não há sessão para aquele JID, de
 	// modo que o chamador possa distinguir "encerrei" de "não havia nada" — sem
@@ -40,18 +42,22 @@ func (t *typebotRepository) UpdateBot(bot *typebot_model.Typebot) error {
 	return t.db.Save(bot).Error
 }
 
-func (t *typebotRepository) DeleteBot(instanceID, id string) error {
+func (t *typebotRepository) DeleteBot(instanceID, id string) (bool, error) {
 	// As sessões são removidas junto: sem o bot elas não têm para onde
 	// continuar, e deixá-las faria a próxima mensagem tentar um continueChat
 	// contra um fluxo que não existe mais.
-	return t.db.Transaction(func(tx *gorm.DB) error {
+	deleted := false
+	err := t.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("instance_id = ? AND typebot_id = ?", instanceID, id).
 			Delete(&typebot_model.TypebotSession{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("instance_id = ? AND id = ?", instanceID, id).
-			Delete(&typebot_model.Typebot{}).Error
+		result := tx.Where("instance_id = ? AND id = ?", instanceID, id).
+			Delete(&typebot_model.Typebot{})
+		deleted = result.RowsAffected > 0
+		return result.Error
 	})
+	return deleted, err
 }
 
 func (t *typebotRepository) GetBotByID(instanceID, id string) (*typebot_model.Typebot, error) {
@@ -96,9 +102,10 @@ func (t *typebotRepository) UpdateSession(session *typebot_model.TypebotSession)
 	return t.db.Save(session).Error
 }
 
-func (t *typebotRepository) DeleteSession(instanceID, id string) error {
-	return t.db.Where("instance_id = ? AND id = ?", instanceID, id).
-		Delete(&typebot_model.TypebotSession{}).Error
+func (t *typebotRepository) DeleteSession(instanceID, id string) (bool, error) {
+	result := t.db.Where("instance_id = ? AND id = ?", instanceID, id).
+		Delete(&typebot_model.TypebotSession{})
+	return result.RowsAffected > 0, result.Error
 }
 
 func (t *typebotRepository) GetSessionByRemoteJid(instanceID, remoteJid string) (*typebot_model.TypebotSession, error) {
@@ -123,10 +130,11 @@ func (t *typebotRepository) GetSessionsByInstanceID(instanceID string) ([]typebo
 	return sessions, nil
 }
 
-func (t *typebotRepository) SetSessionStatus(instanceID, id, status string) error {
-	return t.db.Model(&typebot_model.TypebotSession{}).
+func (t *typebotRepository) SetSessionStatus(instanceID, id, status string) (bool, error) {
+	result := t.db.Model(&typebot_model.TypebotSession{}).
 		Where("instance_id = ? AND id = ?", instanceID, id).
-		Update("status", status).Error
+		Update("status", status)
+	return result.RowsAffected > 0, result.Error
 }
 
 func (t *typebotRepository) SetSessionStatusByRemoteJid(instanceID, remoteJid, status string) (bool, error) {

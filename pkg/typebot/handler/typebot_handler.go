@@ -207,6 +207,7 @@ func applyRequest(bot *typebot_model.Typebot, data *typebot_model.TypebotRequest
 // @Param id path string true "Typebot id"
 // @Success 200 {object} gin.H "success"
 // @Failure 500 {object} gin.H "Internal server error"
+// @Failure 404 {object} gin.H "typebot not found"
 // @Router /typebot/{id} [delete]
 func (t *typebotHandler) DeleteBot(ctx *gin.Context) {
 	instance, ok := instanceFromContext(ctx)
@@ -214,8 +215,13 @@ func (t *typebotHandler) DeleteBot(ctx *gin.Context) {
 		return
 	}
 
-	if err := t.typebotRepository.DeleteBot(instance.Id, ctx.Param("id")); err != nil {
+	deleted, err := t.typebotRepository.DeleteBot(instance.Id, ctx.Param("id"))
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !deleted {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "typebot not found"})
 		return
 	}
 
@@ -257,6 +263,7 @@ func (t *typebotHandler) ListSessions(ctx *gin.Context) {
 // @Success 200 {object} gin.H "success"
 // @Failure 400 {object} gin.H "Error on validation"
 // @Failure 500 {object} gin.H "Internal server error"
+// @Failure 404 {object} gin.H "session not found"
 // @Router /typebot/sessions/{id}/status [put]
 func (t *typebotHandler) UpdateSessionStatus(ctx *gin.Context) {
 	instance, ok := instanceFromContext(ctx)
@@ -279,8 +286,13 @@ func (t *typebotHandler) UpdateSessionStatus(ctx *gin.Context) {
 		return
 	}
 
-	if err := t.typebotRepository.SetSessionStatus(instance.Id, ctx.Param("id"), data.Status); err != nil {
+	changed, err := t.typebotRepository.SetSessionStatus(instance.Id, ctx.Param("id"), data.Status)
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !changed {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
 
@@ -355,6 +367,7 @@ func (t *typebotHandler) ChangeSessionStatus(ctx *gin.Context) {
 // @Param id path string true "Session id"
 // @Success 200 {object} gin.H "success"
 // @Failure 500 {object} gin.H "Internal server error"
+// @Failure 404 {object} gin.H "session not found"
 // @Router /typebot/sessions/{id} [delete]
 func (t *typebotHandler) DeleteSession(ctx *gin.Context) {
 	instance, ok := instanceFromContext(ctx)
@@ -362,8 +375,13 @@ func (t *typebotHandler) DeleteSession(ctx *gin.Context) {
 		return
 	}
 
-	if err := t.typebotRepository.DeleteSession(instance.Id, ctx.Param("id")); err != nil {
+	deleted, err := t.typebotRepository.DeleteSession(instance.Id, ctx.Param("id"))
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !deleted {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
 
