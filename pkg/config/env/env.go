@@ -46,6 +46,9 @@ const (
 	QRCODE_MAX_COUNT        = "QRCODE_MAX_COUNT"
 	CHECK_USER_EXISTS       = "CHECK_USER_EXISTS"
 	REREQUEST_FROM_PHONE    = "REREQUEST_FROM_PHONE"
+	// ALLOW_PRIVATE_URLS é lida direto por pkg/utils/safe_http.go (a cada
+	// conexão), não pelo Config.
+	ALLOW_PRIVATE_URLS = "ALLOW_PRIVATE_URLS"
 
 	// Proteções do Typebot contra flood e laço. Todas lidas no boot: alterar
 	// exige recriar o container, não imagem nova.

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
@@ -72,7 +73,7 @@ func productImageBytes(data *ProductStruct) ([]byte, error) {
 		return img, nil
 	}
 	if data.ImageURL != "" {
-		resp, err := http.Get(data.ImageURL)
+		resp, err := utils.SafeGet(data.ImageURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download imageUrl: %w", err)
 		}

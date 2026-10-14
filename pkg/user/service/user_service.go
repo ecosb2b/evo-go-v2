@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -27,6 +25,12 @@ const avatarRequestTimeout = 8 * time.Second
 
 // clientReadyWait is the max time to wait after StartInstance before failing.
 const clientReadyWait = 2 * time.Second
+
+// Download da foto do perfil (POST /user/profilePicture).
+const (
+	profilePictureMaxBytes = 5 << 20
+	profilePictureTimeout  = 15 * time.Second
+)
 
 type UserService interface {
 	GetUser(data *CheckUserStruct, instance *instance_model.Instance) (*UserCollection, error)
@@ -640,17 +644,11 @@ func (u *userService) SetProfilePicture(data *SetProfilePictureStruct, instance 
 		return false, err
 	}
 
-	var filedata []byte
-
-	resp, err := http.Get(data.Image)
+	// SafeHTTPClient: recusa endereço interno (SSRF), com prazo e tamanho
+	// máximos — antes um IP que não respondia prendia a chamada sem limite.
+	filedata, err := utils.DownloadImage(context.Background(), data.Image, profilePictureMaxBytes, profilePictureTimeout)
 	if err != nil {
-		return false, fmt.Errorf("failed to fetch image from URL: %v", err)
-	}
-	defer resp.Body.Close()
-
-	filedata, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("failed to read image data: %v", err)
+		return false, fmt.Errorf("failed to fetch image from URL: %w", err)
 	}
 
 	_, err = client.SetGroupPhoto(context.Background(), types.EmptyJID, filedata)
