@@ -12,6 +12,44 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.8.1 — 2026-10-14
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.8.1`
+**Digest:** `sha256:41495503fdae84ffef70a7c948cd1e54376967b886f36d6539f195a1d3faed79`
+**Commit:** `d5f68ca`
+
+Correções de segurança e de contrato apontadas na validação real do
+Mobilium-Frontend-V2.
+
+### Segurança: downloads de URL só para endereço público (SSRF)
+
+- Toda URL que a API baixa por conta de quem chama — mídia em `/send/*`
+  (`media`, `sticker`, `link`, `carousel`, `product`, botões com mídia), foto do
+  grupo e foto do perfil — passa por `utils.SafeHTTPClient`. Ele recusa
+  localhost, redes privadas, link-local (inclusive metadados da nuvem) e faixas
+  reservadas **na hora da conexão**: depois do DNS e em cada redirect.
+- Os downloads ganharam timeout (120 s; antes não havia limite e um IP que não
+  respondia prendia a chamada).
+- `POST /user/profilePicture`: limite de 5 MB, prazo de 15 s e `Content-Type`
+  de imagem obrigatório.
+- **Mudança de comportamento:** URL de mídia na rede interna (ex.:
+  `http://minio:9000/...`) passa a falhar. Quem serve mídia de storage interno
+  define `ALLOW_PRIVATE_URLS=true` (desliga a checagem).
+
+### Typebot
+
+- `DELETE /typebot/:id`, `DELETE /typebot/sessions/:id` e
+  `PUT /typebot/sessions/:id/status` respondem `404` (`typebot not found` /
+  `session not found`) quando o item não existe — antes, `200`.
+
+### Variável nova
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `ALLOW_PRIVATE_URLS` | `false` | `true` permite baixar mídia de endereço interno |
+
+---
+
 ## 0.8.0 — 2026-10-12
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.8.0`
