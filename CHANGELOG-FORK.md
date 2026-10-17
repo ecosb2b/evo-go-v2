@@ -12,6 +12,42 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## 0.9.0 — 2026-10-17
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.9.0`
+**Digest:** `sha256:cdf8737a92f8135535cec745476fb71986b7306e137e6cd4b4a1ecab254841f0`
+**Commit:** `10ef339`
+
+Andamento real de cada mensagem enviada: enviada, entregue, lida e reproduzida.
+
+### Recibos de mensagem
+
+- Tabela nova `message_receipts` (criada pela migração no boot): uma linha por
+  mensagem enviada, com `sentAt`, `deliveredAt`, `readAt` e `playedAt`. Guarda só
+  ids e datas, nunca o conteúdo, e funciona independente de
+  `DATABASE_SAVE_MESSAGES`. Cada data é a **primeira** ocorrência: recibos fora
+  de ordem não fazem a mensagem voltar de lida para entregue. Grupos ficam de fora.
+- Todo `/send/*` grava a mensagem como enviada já na saída.
+- Rota nova `POST /message/receipts` `{ "ids": [...] }` (até 200, token da
+  instância): `status` (`sent`, `delivered`, `read`, `played` ou `unknown`) e as
+  datas de cada id, só da própria instância. Não exige a instância conectada.
+
+### Webhook `Receipt`
+
+- O recibo **Played** (o contato ouviu o áudio ou viu o vídeo) deixou de ser
+  descartado: sai com `state: "Played"` (e `"PlayedSelf"` para outro aparelho da
+  própria conta).
+- Recibos de entrega com vários ids: todos são processados (antes, só o primeiro
+  do lote). Recibo repetido (mesmo id e estado) gera um webhook só.
+
+### Variável nova
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `MESSAGE_RECEIPTS_RETENTION_DAYS` | `30` | Dias que o andamento fica guardado (`0` = sempre). Limpeza a cada 6 h. |
+
+---
+
 ## 0.8.1 — 2026-10-14
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.8.1`
