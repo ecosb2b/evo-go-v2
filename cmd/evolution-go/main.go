@@ -55,6 +55,9 @@ import (
 	newsletter_service "github.com/evolution-foundation/evolution-go/pkg/newsletter/service"
 	passkey_handler "github.com/evolution-foundation/evolution-go/pkg/passkey/handler"
 	poll_handler "github.com/evolution-foundation/evolution-go/pkg/poll/handler"
+	receipt_handler "github.com/evolution-foundation/evolution-go/pkg/receipt/handler"
+	receipt_model "github.com/evolution-foundation/evolution-go/pkg/receipt/model"
+	receipt_repository "github.com/evolution-foundation/evolution-go/pkg/receipt/repository"
 	routes "github.com/evolution-foundation/evolution-go/pkg/routes"
 	send_handler "github.com/evolution-foundation/evolution-go/pkg/sendMessage/handler"
 	send_service "github.com/evolution-foundation/evolution-go/pkg/sendMessage/service"
@@ -167,6 +170,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 	messageRepository := message_repository.NewMessageRepository(db)
 	labelRepository := label_repository.NewLabelRepository(db)
 	typebotRepository := typebot_repository.NewTypebotRepository(db)
+	receiptRepository := receipt_repository.NewReceiptRepository(db)
 
 	whatsmeowService := whatsmeow_service.NewWhatsmeowService(
 		instanceRepository,
@@ -214,6 +218,8 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		loggerWrapper,
 	)
 	whatsmeowService.SetTypebotService(typebotService)
+	whatsmeowService.SetReceiptRepository(receiptRepository)
+	go cleanupReceipts(receiptRepository, config.MessageReceiptsRetentionDays)
 
 	// NOVO: PollHandler usando PollService já inicializado no whatsmeowService (evita dupla inicialização)
 	pollHandler := poll_handler.NewPollHandler(whatsmeowService.GetPollService(), loggerWrapper)
@@ -266,6 +272,7 @@ func setupRouter(db *gorm.DB, authDB *sql.DB, sqliteDB *sql.DB, config *config.C
 		pollHandler,
 		server_handler.NewServerHandler(messageRepository),
 		typebot_handler.NewTypebotHandler(typebotRepository, loggerWrapper),
+		receipt_handler.NewReceiptHandler(receiptRepository),
 	).AssignRoutes(r)
 
 	if config.ConnectOnStartup {
@@ -295,10 +302,36 @@ func migrate(db *gorm.DB) {
 		&label_model.Label{},
 		&typebot_model.Typebot{},
 		&typebot_model.TypebotSession{},
+		&receipt_model.MessageReceipt{},
 	)
 
 	if err != nil {
 		log.Fatal(err)
+	}
+}
+
+// cleanupReceipts apaga o andamento das mensagens sem mudança há mais de
+// retentionDays dias, uma vez no boot e depois a cada 6 h. 0 = guarda sempre.
+func cleanupReceipts(repo receipt_repository.ReceiptRepository, retentionDays int) {
+	if retentionDays <= 0 {
+		return
+	}
+	run := func() {
+		cutoff := time.Now().AddDate(0, 0, -retentionDays)
+		n, err := repo.DeleteOlderThan(cutoff)
+		if err != nil {
+			log.Printf("[receipts] cleanup failed: %v", err)
+			return
+		}
+		if n > 0 {
+			log.Printf("[receipts] removed %d receipt(s) older than %d day(s)", n, retentionDays)
+		}
+	}
+	run()
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		run()
 	}
 }
 

@@ -60,8 +60,11 @@ type Config struct {
 	EventIgnoreGroup     bool
 	EventIgnoreStatus    bool
 	QrcodeMaxCount       int
-	CheckUserExists      bool
-	RerequestFromPhone   bool
+	// MessageReceiptsRetentionDays: dias que o andamento das mensagens enviadas
+	// fica guardado (0 = para sempre). Padrão 30.
+	MessageReceiptsRetentionDays int
+	CheckUserExists              bool
+	RerequestFromPhone           bool
 
 	// Proteções do Typebot. Ver pkg/typebot/service/protection.go.
 	TypebotContactRateLimit  int
@@ -303,6 +306,7 @@ func Load() *Config {
 	}
 
 	qrMaxCount := parseQRMaxCount(qrcodeMaxCount)
+	receiptsRetention := parseRetentionDays(os.Getenv(config_env.MESSAGE_RECEIPTS_RETENTION_DAYS))
 
 	amqpGlobalEvents := strings.Split(os.Getenv(config_env.AMQP_GLOBAL_EVENTS), ",")
 	if len(amqpGlobalEvents) == 1 && amqpGlobalEvents[0] == "" {
@@ -362,49 +366,50 @@ func Load() *Config {
 	}
 
 	config := &Config{
-		PostgresAuthDB:       postgresAuthDB,
-		postgresUsersDB:      postgresUsersDB,
-		DatabaseSaveMessages: databaseSaveMessages == "true",
-		GlobalApiKey:         globalApiKey,
-		WaDebug:              waDebug,
-		LogType:              logType,
-		WebhookFiles:         webhookFiles == "true",
-		ConnectOnStartup:     connectOnStartup == "true",
-		OsName:               osName,
-		AmqpUrl:              amqpUrl,
-		AmqpGlobalEnabled:    amqpGlobalEnabled == "true",
-		WebhookUrl:           webhookUrl,
-		ClientName:           clientName,
-		ApiAudioConverter:    apiAudioConverter,
-		ApiAudioConverterKey: apiAudioConverterKey,
-		PostgresHost:         postgresHost,
-		PostgresPort:         postgresPort,
-		PostgresUser:         postgresUser,
-		PostgresPassword:     postgresPassword,
-		PostgresDB:           postgresDB,
-		WhatsappVersionMajor: major,
-		WhatsappVersionMinor: minor,
-		WhatsappVersionPatch: patch,
-		ProxyProtocol:        proxyProtocol,
-		ProxyHost:            proxyHost,
-		ProxyPort:            proxyPort,
-		ProxyUsername:        proxyUsername,
-		ProxyPassword:        proxyPassword,
-		EventIgnoreGroup:     eventIgnoreGroup == "true",
-		EventIgnoreStatus:    eventIgnoreStatus == "true",
-		QrcodeMaxCount:       qrMaxCount,
-		CheckUserExists:      checkUserExists != "false",    // Default true, set to false to disable
-		RerequestFromPhone:   rerequestFromPhone != "false", // Default true, set to false to disable
-		AmqpGlobalEvents:     amqpGlobalEvents,
-		AmqpSpecificEvents:   amqpSpecificEvents,
-		NatsUrl:              natsUrl,
-		NatsGlobalEnabled:    natsGlobalEnabled == "true",
-		NatsGlobalEvents:     natsGlobalEvents,
-		LogMaxSize:           logMaxSize,
-		LogMaxBackups:        logMaxBackups,
-		LogMaxAge:            logMaxAge,
-		LogDirectory:         logDirectory,
-		LogCompress:          logCompress,
+		PostgresAuthDB:               postgresAuthDB,
+		postgresUsersDB:              postgresUsersDB,
+		DatabaseSaveMessages:         databaseSaveMessages == "true",
+		GlobalApiKey:                 globalApiKey,
+		WaDebug:                      waDebug,
+		LogType:                      logType,
+		WebhookFiles:                 webhookFiles == "true",
+		ConnectOnStartup:             connectOnStartup == "true",
+		OsName:                       osName,
+		AmqpUrl:                      amqpUrl,
+		AmqpGlobalEnabled:            amqpGlobalEnabled == "true",
+		WebhookUrl:                   webhookUrl,
+		ClientName:                   clientName,
+		ApiAudioConverter:            apiAudioConverter,
+		ApiAudioConverterKey:         apiAudioConverterKey,
+		PostgresHost:                 postgresHost,
+		PostgresPort:                 postgresPort,
+		PostgresUser:                 postgresUser,
+		PostgresPassword:             postgresPassword,
+		PostgresDB:                   postgresDB,
+		WhatsappVersionMajor:         major,
+		WhatsappVersionMinor:         minor,
+		WhatsappVersionPatch:         patch,
+		ProxyProtocol:                proxyProtocol,
+		ProxyHost:                    proxyHost,
+		ProxyPort:                    proxyPort,
+		ProxyUsername:                proxyUsername,
+		ProxyPassword:                proxyPassword,
+		EventIgnoreGroup:             eventIgnoreGroup == "true",
+		EventIgnoreStatus:            eventIgnoreStatus == "true",
+		QrcodeMaxCount:               qrMaxCount,
+		MessageReceiptsRetentionDays: receiptsRetention,
+		CheckUserExists:              checkUserExists != "false",    // Default true, set to false to disable
+		RerequestFromPhone:           rerequestFromPhone != "false", // Default true, set to false to disable
+		AmqpGlobalEvents:             amqpGlobalEvents,
+		AmqpSpecificEvents:           amqpSpecificEvents,
+		NatsUrl:                      natsUrl,
+		NatsGlobalEnabled:            natsGlobalEnabled == "true",
+		NatsGlobalEvents:             natsGlobalEvents,
+		LogMaxSize:                   logMaxSize,
+		LogMaxBackups:                logMaxBackups,
+		LogMaxAge:                    logMaxAge,
+		LogDirectory:                 logDirectory,
+		LogCompress:                  logCompress,
 
 		TypebotContactRateLimit:  typebotContactRateLimit,
 		TypebotContactRateWindow: typebotContactRateWindow,
@@ -500,6 +505,22 @@ func validateAMQPURL(amqpURL string) error {
 // defaultQRMaxCount: a 7ª emissão encerra a sessão, então 6 códigos aparecem
 // (60 s + 5 × 20 s = ~160 s), a janela inteira que o WhatsApp oferece.
 const defaultQRMaxCount = 7
+
+const defaultReceiptsRetentionDays = 30
+
+// parseRetentionDays lê MESSAGE_RECEIPTS_RETENTION_DAYS. 0 guarda para sempre;
+// vazio ou inválido usa o padrão (30).
+func parseRetentionDays(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultReceiptsRetentionDays
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return defaultReceiptsRetentionDays
+	}
+	return n
+}
 
 // parseQRMaxCount lê QRCODE_MAX_COUNT. 0 desliga o limite; vazio ou inválido
 // usa o padrão (antes, um valor inválido virava 0 e desligava o limite).

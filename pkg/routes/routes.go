@@ -18,6 +18,7 @@ import (
 	auth_middleware "github.com/evolution-foundation/evolution-go/pkg/middleware"
 	newsletter_handler "github.com/evolution-foundation/evolution-go/pkg/newsletter/handler"
 	poll_handler "github.com/evolution-foundation/evolution-go/pkg/poll/handler"
+	receipt_handler "github.com/evolution-foundation/evolution-go/pkg/receipt/handler"
 	send_handler "github.com/evolution-foundation/evolution-go/pkg/sendMessage/handler"
 	server_handler "github.com/evolution-foundation/evolution-go/pkg/server/handler"
 	typebot_handler "github.com/evolution-foundation/evolution-go/pkg/typebot/handler"
@@ -40,6 +41,7 @@ type Routes struct {
 	pollHandler             *poll_handler.PollHandler
 	serverHandler           server_handler.ServerHandler
 	typebotHandler          typebot_handler.TypebotHandler
+	receiptHandler          receipt_handler.ReceiptHandler
 }
 
 func (r *Routes) AssignRoutes(eng *gin.Engine) {
@@ -188,6 +190,7 @@ func (r *Routes) AssignRoutes(eng *gin.Engine) {
 			routes.POST("/markplayed", r.jidValidationMiddleware.ValidateNumberField(), r.messageHandler.MarkPlayed)
 			routes.POST("/downloadmedia", r.messageHandler.DownloadMedia)
 			routes.POST("/status", r.messageHandler.GetMessageStatus)
+			routes.POST("/receipts", r.receiptHandler.GetReceipts)
 			routes.POST("/delete", r.jidValidationMiddleware.ValidateNumberField(), r.messageHandler.DeleteMessageEveryone)
 			routes.POST("/edit", r.jidValidationMiddleware.ValidateNumberField(), r.messageHandler.EditMessage) // TODO: edit MediaMessage too
 		}
@@ -320,6 +323,7 @@ func NewRouter(
 	pollHandler *poll_handler.PollHandler,
 	serverHandler server_handler.ServerHandler,
 	typebotHandler typebot_handler.TypebotHandler,
+	receiptHandler receipt_handler.ReceiptHandler,
 ) *Routes {
 	return &Routes{
 		authMiddleware:          authMiddleware,
@@ -337,5 +341,6 @@ func NewRouter(
 		pollHandler:             pollHandler,
 		serverHandler:           serverHandler,
 		typebotHandler:          typebotHandler,
+		receiptHandler:          receiptHandler,
 	}
 }

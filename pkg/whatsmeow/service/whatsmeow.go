@@ -45,6 +45,8 @@ import (
 	message_repository "github.com/evolution-foundation/evolution-go/pkg/message/repository"
 	"github.com/evolution-foundation/evolution-go/pkg/passkey/ceremony"
 	poll_service "github.com/evolution-foundation/evolution-go/pkg/poll/service"
+	receipt_model "github.com/evolution-foundation/evolution-go/pkg/receipt/model"
+	receipt_repository "github.com/evolution-foundation/evolution-go/pkg/receipt/repository"
 	storage_interfaces "github.com/evolution-foundation/evolution-go/pkg/storage/interfaces"
 	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
@@ -62,6 +64,15 @@ type WhatsmeowService interface {
 	// DispatchToTypebot repassa uma mensagem recebida ao Typebot, se houver um
 	// configurado. Não bloqueia: a chamada HTTP acontece em outra goroutine.
 	DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool)
+	// SetReceiptRepository liga o registro de andamento das mensagens enviadas
+	// (enviada/entregue/lida/reproduzida). Chamado uma única vez no boot.
+	SetReceiptRepository(repository receipt_repository.ReceiptRepository)
+	// RecordMessageSent marca a mensagem como enviada. Não bloqueia; grupos e
+	// broadcasts são ignorados.
+	RecordMessageSent(instanceId, messageId string, chat types.JID, at time.Time)
+	// RecordReceipt grava um recibo (entregue/lida/reproduzida). Não bloqueia;
+	// grupos e broadcasts são ignorados.
+	RecordReceipt(instanceId string, messageIds []string, chat types.JID, state receipt_model.State, at time.Time)
 	ReconnectClient(instanceId string) error
 	ScheduleReconnect(instanceId string)
 	// ConnectedClient devolve o cliente pronto para enviar ou
@@ -109,6 +120,7 @@ type whatsmeowService struct {
 	instanceRepository instance_repository.InstanceRepository
 	authDB             *sql.DB
 	typebotProcessor   TypebotProcessor
+	receiptRepository  receipt_repository.ReceiptRepository
 	messageRepository  message_repository.MessageRepository
 	labelRepository    label_repository.LabelRepository
 	pollService        poll_service.PollService // NOVO: Serviço de enquetes
@@ -1882,70 +1894,56 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		doWebhook = true
 		postMap["event"] = "Receipt"
 
-		// se ignoreGroup for true e o chat for grupo retorna
-		if mycli.currentInstance().IgnoreGroups && strings.Contains(evt.Chat.String(), "@g.us") {
+		isGroup := evt.Chat.Server == types.GroupServer
+		if isGroup && (mycli.currentInstance().IgnoreGroups || mycli.config.EventIgnoreGroup) {
+			return
+		}
+		if len(evt.MessageIDs) == 0 {
 			return
 		}
 
-		if mycli.config.EventIgnoreGroup && strings.Contains(evt.Chat.String(), "@g.us") {
+		webhookState, recordState, known := classifyReceipt(evt.Type)
+		if !known {
+			return
+		}
+		postMap["state"] = webhookState
+
+		// O WhatsApp reenvia recibos e agrupa vários ids num só. Antes, só o
+		// primeiro id dos recibos de entrega era processado (os demais do lote
+		// nunca apareciam como entregues). Agora vale cada id, uma vez por estado.
+		fresh := make([]string, 0, len(evt.MessageIDs))
+		for _, id := range evt.MessageIDs {
+			key := fmt.Sprintf("%s_%s_%s", mycli.userID, id, webhookState)
+			if _, found := mycli.processedMessages.Get(key); found {
+				continue
+			}
+			mycli.processedMessages.Set(key, true, 30*time.Minute)
+			fresh = append(fresh, id)
+		}
+		if len(fresh) == 0 {
+			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Duplicated %s receipt ignored: %v", mycli.userID, webhookState, evt.MessageIDs)
 			return
 		}
 
-		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Receipt received with ID: %s from %s with type %s", mycli.userID, evt.MessageIDs[0], evt.SourceString(), evt.Type)
+		mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] %s receipt for %d message(s) from %s", mycli.userID, webhookState, len(fresh), evt.SourceString())
 
-		if evt.Type == types.ReceiptTypeRead || evt.Type == types.ReceiptTypeReadSelf {
+		// Andamento das mensagens que ESTA instância enviou (recibo vindo do
+		// contato, não de outro aparelho da própria conta). Grupos ficam de fora
+		// (RecordReceipt descarta).
+		if recordState != "" && !evt.IsFromMe {
+			mycli.service.RecordReceipt(mycli.userID, fresh, evt.Chat, recordState, evt.Timestamp)
+		}
 
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Message was read by %s", mycli.userID, evt.SourceString())
-			if evt.Type == types.ReceiptTypeRead {
-				postMap["state"] = "Read"
-				for _, v := range evt.MessageIDs {
-					messageKey := fmt.Sprintf("%s_%s_%s", mycli.userID, v, "Read")
-					if _, found := mycli.processedMessages.Get(messageKey); found {
-						mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Message duplicated ignored: %s", mycli.userID, v)
-						continue
-					}
-
-					mycli.processedMessages.Set(messageKey, true, 30*time.Minute)
-
-					var message message_model.Message
-
-					message.MessageID = v
-					message.Timestamp = evt.Timestamp.Format("2006-01-02 15:04:05")
-					message.Status = "Read"
-					message.Source = evt.Chat.ToNonAD().User
-
-					if mycli.config.DatabaseSaveMessages {
-						mycli.persistMessageAsync(message)
-					}
-				}
-			} else {
-				postMap["state"] = "ReadSelf"
+		// Tabela antiga de mensagens (só com DATABASE_SAVE_MESSAGES=true).
+		if mycli.config.DatabaseSaveMessages && (webhookState == "Read" || webhookState == "Delivered") {
+			for _, id := range fresh {
+				mycli.persistMessageAsync(message_model.Message{
+					MessageID: id,
+					Timestamp: evt.Timestamp.Format("2006-01-02 15:04:05"),
+					Status:    webhookState,
+					Source:    evt.Chat.ToNonAD().User,
+				})
 			}
-		} else if evt.Type == types.ReceiptTypeDelivered {
-			postMap["state"] = "Delivered"
-
-			var message message_model.Message
-
-			message.MessageID = evt.MessageIDs[0]
-			message.Timestamp = evt.Timestamp.Format("2006-01-02 15:04:05")
-			message.Status = "Delivered"
-			message.Source = evt.Chat.ToNonAD().User
-
-			messageKey := fmt.Sprintf("%s_%s_%s", mycli.userID, evt.MessageIDs[0], "Delivered")
-			if _, found := mycli.processedMessages.Get(messageKey); found {
-				mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Message duplicated ignored: %s", mycli.userID, evt.MessageIDs[0])
-				return
-			}
-
-			mycli.processedMessages.Set(messageKey, true, 30*time.Minute)
-
-			if mycli.config.DatabaseSaveMessages {
-				mycli.persistMessageAsync(message)
-			}
-
-			mycli.loggerWrapper.GetLogger(mycli.userID).LogInfo("[%s] Message delivered to %s", mycli.userID, evt.SourceString())
-		} else {
-			return
 		}
 	case *events.Presence:
 		doWebhook = true
@@ -3031,11 +3029,54 @@ func (w *whatsmeowService) SetTypebotService(processor TypebotProcessor) {
 // DispatchToTypebot repassa a mensagem ao Typebot numa goroutine própria. Sem
 // isso, a chamada HTTP (até 30s de timeout) seguraria a goroutine de despacho de
 // eventos do whatsmeow e atrasaria todo o restante daquela instância.
-func (w whatsmeowService) DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool) {
+func (w *whatsmeowService) DispatchToTypebot(instance *instance_model.Instance, remoteJid, pushName, content string, fromMe bool) {
 	if w.typebotProcessor == nil || instance == nil {
 		return
 	}
 	utils.Go("typebotProcessMessage", func() { w.typebotProcessor.ProcessMessage(instance, remoteJid, pushName, content, fromMe) })
+}
+
+// SetReceiptRepository: chamado uma única vez no boot, antes de qualquer
+// cliente subir (mesma regra do SetTypebotService).
+func (w *whatsmeowService) SetReceiptRepository(repository receipt_repository.ReceiptRepository) {
+	w.receiptRepository = repository
+}
+
+// receiptChat devolve o JID da conversa individual, ou "" para grupo,
+// broadcast, canal e status — esses ficam fora do registro de andamento.
+func receiptChat(chat types.JID) string {
+	switch chat.Server {
+	case types.DefaultUserServer, types.HiddenUserServer:
+		return chat.ToNonAD().String()
+	default:
+		return ""
+	}
+}
+
+// RecordReceipt grava o estado numa goroutine própria: a goroutine de eventos
+// do whatsmeow não pode esperar o banco.
+func (w *whatsmeowService) RecordReceipt(instanceId string, messageIds []string, chat types.JID, state receipt_model.State, at time.Time) {
+	if w == nil || w.receiptRepository == nil || len(messageIds) == 0 {
+		return
+	}
+	chatJID := receiptChat(chat)
+	if chatJID == "" {
+		return
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	ids := append([]string(nil), messageIds...)
+	repo := w.receiptRepository
+	utils.Go("recordReceipt", func() {
+		if err := repo.Record(instanceId, ids, chatJID, state, at); err != nil {
+			w.loggerWrapper.GetLogger(instanceId).LogError("[%s] Failed to record %s receipt for %d message(s): %v", instanceId, state, len(ids), err)
+		}
+	})
+}
+
+func (w *whatsmeowService) RecordMessageSent(instanceId, messageId string, chat types.JID, at time.Time) {
+	w.RecordReceipt(instanceId, []string{messageId}, chat, receipt_model.StateSent, at)
 }
 
 // GetPollService retorna o serviço de polls (evita dupla inicialização)
