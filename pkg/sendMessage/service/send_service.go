@@ -2702,6 +2702,14 @@ func (s *sendService) SendMessage(instance *instance_model.Instance, msg *waE2E.
 
 	s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Message sent successfully! ServerID: %d", instance.Id, response.ServerID)
 
+	// Andamento da mensagem: "enviada" já no envio, para a consulta de recibos
+	// achar a mensagem antes do primeiro recibo chegar. Grupos ficam de fora.
+	sentAt := response.Timestamp
+	if sentAt.IsZero() {
+		sentAt = time.Now()
+	}
+	s.whatsmeowService.RecordMessageSent(instance.Id, message, recipient, sentAt)
+
 	messageInfo := types.MessageInfo{
 		MessageSource: types.MessageSource{
 			Chat:     recipient,

@@ -279,6 +279,20 @@ mesmo docker-compose).
 ALLOW_PRIVATE_URLS=false
 ```
 
+### MESSAGE_RECEIPTS_RETENTION_DAYS
+
+Dias que o **andamento das mensagens enviadas** fica guardado: quando cada
+mensagem foi enviada, entregue, lida e reproduzida (áudio/vídeo), consultado em
+`POST /message/receipts`. Só conversas individuais; guarda ids e datas, nunca o
+conteúdo. Funciona independente de `DATABASE_SAVE_MESSAGES`. Registros sem
+mudança há mais tempo que isso são apagados a cada 6 h.
+
+**Padrão**: `30` · `0` = guarda para sempre
+
+```env
+MESSAGE_RECEIPTS_RETENTION_DAYS=30
+```
+
 ### EVENT_IGNORE_GROUP
 
 Ignora eventos originados de grupos.

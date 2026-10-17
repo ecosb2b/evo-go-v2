@@ -46,6 +46,8 @@ const (
 	QRCODE_MAX_COUNT        = "QRCODE_MAX_COUNT"
 	CHECK_USER_EXISTS       = "CHECK_USER_EXISTS"
 	REREQUEST_FROM_PHONE    = "REREQUEST_FROM_PHONE"
+	// Dias que o andamento das mensagens enviadas fica guardado (0 = sempre).
+	MESSAGE_RECEIPTS_RETENTION_DAYS = "MESSAGE_RECEIPTS_RETENTION_DAYS"
 	// ALLOW_PRIVATE_URLS é lida direto por pkg/utils/safe_http.go (a cada
 	// conexão), não pelo Config.
 	ALLOW_PRIVATE_URLS = "ALLOW_PRIVATE_URLS"
