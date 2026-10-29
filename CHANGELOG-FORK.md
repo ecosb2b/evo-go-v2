@@ -12,7 +12,11 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
-## Não lançado
+## 0.9.1 — 2026-10-29
+
+**Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.9.1`
+**Digest:** `sha256:0bc662bf894732826f326ee3847cd1492e0ebb92e1f5d6eedafa0adb415e5422`
+**Commit:** `9a4ff2e`
 
 ### Segurança: download de mídia (SSRF)
 
