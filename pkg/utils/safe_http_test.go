@@ -18,13 +18,15 @@ func TestIsPublicIP(t *testing.T) {
 		"224.0.0.1", "255.255.255.255",
 		"::", "::1", "fc00::1", "fd12::1", "fe80::1", "ff02::1",
 		"::ffff:10.0.0.1", "::ffff:127.0.0.1", "64:ff9b::a00:1",
+		"::ffff:a9fe:a9fe", "::7f00:1", "64:ff9b:1::1", "100::1", "2001::1",
+		"2002:7f00:1::1", "fec0::1", "198.51.100.7", "203.0.113.9",
 	}
 	for _, s := range private {
 		if IsPublicIP(net.ParseIP(s)) {
 			t.Errorf("IsPublicIP(%s) = true, want false", s)
 		}
 	}
-	public := []string{"8.8.8.8", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:8.8.8.8"}
+	public := []string{"8.8.8.8", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:8.8.8.8", "2001:4860:4860::8888"}
 	for _, s := range public {
 		if !IsPublicIP(net.ParseIP(s)) {
 			t.Errorf("IsPublicIP(%s) = false, want true", s)
@@ -122,5 +124,118 @@ func TestDownloadImage(t *testing.T) {
 	}
 	if _, err := DownloadImage(ctx, srv.URL+"/slow.jpg", 1024, 100*time.Millisecond); err == nil {
 		t.Error("slow download did not time out")
+	}
+}
+
+func TestCheckRedirect(t *testing.T) {
+	req := func(raw string) *http.Request {
+		r, _ := http.NewRequest(http.MethodGet, raw, nil)
+		return r
+	}
+	https := req("https://a.example/")
+	via := func(n int) []*http.Request {
+		out := make([]*http.Request, n)
+		for i := range out {
+			out[i] = https
+		}
+		return out
+	}
+	if err := checkRedirect(req("https://b.example/"), via(3)); err != nil {
+		t.Errorf("3º redirect: %v, want nil", err)
+	}
+	if err := checkRedirect(req("https://b.example/"), via(4)); !errors.Is(err, ErrTooManyRedirects) {
+		t.Errorf("4º redirect: %v, want ErrTooManyRedirects", err)
+	}
+	if err := checkRedirect(req("http://169.254.169.254/"), via(1)); !errors.Is(err, ErrRedirectScheme) {
+		t.Errorf("https → http: %v, want ErrRedirectScheme", err)
+	}
+	if err := checkRedirect(req("file:///etc/passwd"), via(1)); !errors.Is(err, ErrRedirectScheme) {
+		t.Errorf("file://: %v, want ErrRedirectScheme", err)
+	}
+	if err := checkRedirect(req("http://b.example/"), []*http.Request{req("http://a.example/")}); err != nil {
+		t.Errorf("http → http: %v, want nil", err)
+	}
+}
+
+func TestMediaDownloadMaxBytes(t *testing.T) {
+	t.Setenv("MEDIA_DOWNLOAD_MAX_MB", "")
+	if got := MediaDownloadMaxBytes(); got != 100<<20 {
+		t.Errorf("padrão = %d, want %d", got, 100<<20)
+	}
+	t.Setenv("MEDIA_DOWNLOAD_MAX_MB", "16")
+	if got := MediaDownloadMaxBytes(); got != 16<<20 {
+		t.Errorf("16 MB = %d", got)
+	}
+	t.Setenv("MEDIA_DOWNLOAD_MAX_MB", "abc")
+	if got := MediaDownloadMaxBytes(); got != 100<<20 {
+		t.Errorf("inválido = %d, want padrão", got)
+	}
+}
+
+func TestDownloadLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok.pdf":
+			_, _ = w.Write([]byte("%PDF-1.4"))
+		case "/big": // sem Content-Length (chunked): o limite conta o que chega
+			_, _ = w.Write([]byte(strings.Repeat("x", 512)))
+			w.(http.Flusher).Flush()
+			_, _ = w.Write([]byte(strings.Repeat("x", 2048)))
+		case "/small":
+			_, _ = w.Write([]byte(strings.Repeat("x", 512)))
+			w.(http.Flusher).Flush()
+			_, _ = w.Write([]byte(strings.Repeat("x", 512)))
+		case "/declared":
+			w.Header().Set("Content-Length", "4096")
+			_, _ = w.Write([]byte(strings.Repeat("x", 4096)))
+		case "/loop":
+			http.Redirect(w, r, "/loop", http.StatusFound)
+		case "/two":
+			http.Redirect(w, r, "/one", http.StatusFound)
+		case "/one":
+			http.Redirect(w, r, "/ok.pdf", http.StatusFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+
+	t.Run("recusa endereço interno sem repetir a URL", func(t *testing.T) {
+		t.Setenv("ALLOW_PRIVATE_URLS", "")
+		_, err := DownloadLimited(ctx, srv.URL+"/ok.pdf?token=segredo", 1024)
+		if !errors.Is(err, ErrPrivateAddress) || !IsMediaURLRefused(err) {
+			t.Fatalf("err = %v, want ErrPrivateAddress", err)
+		}
+		if strings.Contains(err.Error(), "segredo") || strings.Contains(err.Error(), "ok.pdf") {
+			t.Fatalf("erro repete a URL: %v", err)
+		}
+		if !strings.HasPrefix(err.Error(), "media download failed: ") {
+			t.Fatalf("prefixo: %v", err)
+		}
+	})
+
+	t.Setenv("ALLOW_PRIVATE_URLS", "true") // o servidor de teste é local
+
+	if data, err := DownloadLimited(ctx, srv.URL+"/ok.pdf", 1024); err != nil || string(data) != "%PDF-1.4" {
+		t.Fatalf("ok.pdf: data=%q err=%v", data, err)
+	}
+	if _, err := DownloadLimited(ctx, srv.URL+"/two", 1024); err != nil {
+		t.Errorf("2 redirects: %v, want nil", err)
+	}
+	for _, path := range []string{"/big", "/declared"} {
+		if _, err := DownloadLimited(ctx, srv.URL+path, 1024); !errors.Is(err, ErrMediaTooLarge) {
+			t.Errorf("%s: %v, want ErrMediaTooLarge", path, err)
+		}
+	}
+	if data, err := DownloadLimited(ctx, srv.URL+"/small", 1024); err != nil || len(data) != 1024 {
+		t.Errorf("/small no limite exato: len=%d err=%v", len(data), err)
+	}
+	if _, err := DownloadLimited(ctx, srv.URL+"/loop", 1024); !errors.Is(err, ErrTooManyRedirects) {
+		t.Errorf("/loop: %v, want ErrTooManyRedirects", err)
+	}
+	_, err := DownloadLimited(ctx, srv.URL+"/missing", 1024)
+	if err == nil || err.Error() != "media download failed: HTTP status 404" || IsMediaURLRefused(err) {
+		t.Errorf("/missing: %v", err)
 	}
 }

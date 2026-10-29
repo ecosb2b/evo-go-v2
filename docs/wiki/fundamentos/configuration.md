@@ -279,6 +279,23 @@ mesmo docker-compose).
 ALLOW_PRIVATE_URLS=false
 ```
 
+Independente dessa variável, todo download de mídia segue no máximo 3
+redirects e nunca de `https` para `http`. Recusa por endereço interno,
+redirect ou tamanho responde `422`, e a mensagem de erro não repete a URL.
+
+### MEDIA_DOWNLOAD_MAX_MB
+
+Tamanho máximo, em MB, de uma mídia baixada por URL em `/send/media` e
+`/send/status/media`. Confere o `Content-Length` e também os bytes recebidos.
+Acima disso o envio responde `422` (`media larger than the download limit`).
+O sticker tem limite próprio de 16 MB.
+
+**Padrão**: `100`
+
+```env
+MEDIA_DOWNLOAD_MAX_MB=100
+```
+
 ### MESSAGE_RECEIPTS_RETENTION_DAYS
 
 Dias que o **andamento das mensagens enviadas** fica guardado: quando cada

@@ -51,6 +51,9 @@ const (
 	// ALLOW_PRIVATE_URLS é lida direto por pkg/utils/safe_http.go (a cada
 	// conexão), não pelo Config.
 	ALLOW_PRIVATE_URLS = "ALLOW_PRIVATE_URLS"
+	// MEDIA_DOWNLOAD_MAX_MB também é lida direto por pkg/utils/safe_http.go:
+	// teto (MB) da mídia baixada por URL. Padrão 100.
+	MEDIA_DOWNLOAD_MAX_MB = "MEDIA_DOWNLOAD_MAX_MB"
 
 	// Proteções do Typebot contra flood e laço. Todas lidas no boot: alterar
 	// exige recriar o container, não imagem nova.

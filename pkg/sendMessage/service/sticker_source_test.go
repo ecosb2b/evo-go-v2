@@ -2,9 +2,12 @@ package send_service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 )
 
 func TestWebPDetection(t *testing.T) {
@@ -31,6 +34,22 @@ func TestWebPDetection(t *testing.T) {
 }
 
 func TestFetchStickerData(t *testing.T) {
+	t.Run("rejects private address", func(t *testing.T) {
+		t.Setenv("ALLOW_PRIVATE_URLS", "")
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("segredo interno"))
+		}))
+		defer srv.Close()
+
+		_, err := fetchStickerData(context.Background(), srv.URL)
+		if !errors.Is(err, utils.ErrPrivateAddress) {
+			t.Fatalf("err = %v, want ErrPrivateAddress", err)
+		}
+	})
+
+	// O servidor de teste é local: daqui para baixo, só a lógica do download.
+	t.Setenv("ALLOW_PRIVATE_URLS", "true")
+
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("sticker-bytes"))

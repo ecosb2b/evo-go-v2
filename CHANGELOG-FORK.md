@@ -12,6 +12,36 @@ Imagens: `ghcr.io/ecosb2b/evo-go-v2`
 
 ---
 
+## Não lançado
+
+### Segurança: download de mídia (SSRF)
+
+- `/send/sticker` e `/send/status/media` por URL passam a baixar pelo
+  `utils.SafeHTTPClient` (endereço interno recusado na conexão). A 0.8.1
+  listava o sticker como protegido, mas ele e o status usavam um cliente HTTP
+  comum, sem checagem nenhuma (e o status, sem prazo).
+- Download de mídia: no máximo **3** redirects (antes 5) e nunca de `https` para
+  `http`.
+- Faixas recusadas novas: `::/96` (IPv4-compatível), `64:ff9b:1::/48`,
+  `100::/64`, Teredo `2001::/32`, 6to4 `2002::/16` e `fec0::/10`.
+- `/send/media` e `/send/status/media` por URL: teto de tamanho
+  (`MEDIA_DOWNLOAD_MAX_MB`, padrão 100), conferido no `Content-Length` e nos
+  bytes recebidos. Antes não havia teto: uma URL de arquivo enorme esgotava a
+  memória. Resposta não 2xx do servidor da mídia agora é erro
+  (`media download failed: HTTP status 404`); antes a página de erro era enviada
+  como mídia.
+- Recusa por endereço interno, redirect ou tamanho responde **422** (antes 500).
+- O erro do download não repete mais a URL (podia ter token na query) e começa
+  com `media download failed:`.
+
+### Variável nova
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `MEDIA_DOWNLOAD_MAX_MB` | `100` | Tamanho máximo (MB) de mídia baixada por URL |
+
+---
+
 ## 0.9.0 — 2026-10-17
 
 **Imagem:** `ghcr.io/ecosb2b/evo-go-v2:0.9.0`
