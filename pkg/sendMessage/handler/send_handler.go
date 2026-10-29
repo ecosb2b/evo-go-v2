@@ -10,6 +10,7 @@ import (
 
 	instance_model "github.com/evolution-foundation/evolution-go/pkg/instance/model"
 	send_service "github.com/evolution-foundation/evolution-go/pkg/sendMessage/service"
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 	"github.com/gin-gonic/gin"
 )
@@ -844,10 +845,16 @@ func NewSendHandler(
 }
 
 // writeSendError responde 409 quando a instância não está conectada, para o
-// cliente distinguir "reconecte a instância" de uma falha do envio em si.
+// cliente distinguir "reconecte a instância" de uma falha do envio em si, e 422
+// quando a URL da mídia foi recusada (endereço interno, redirect, tamanho):
+// erro do pedido, re-tentar não resolve.
 func writeSendError(ctx *gin.Context, err error) {
 	if errors.Is(err, whatsmeow_service.ErrInstanceNotConnected) {
 		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	if utils.IsMediaURLRefused(err) {
+		ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

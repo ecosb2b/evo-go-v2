@@ -1175,20 +1175,11 @@ func (s *sendService) sendMediaUrlWithRetry(data *MediaStruct, instance *instanc
 
 		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Iniciando download da URL: %s", instance.Id, data.Url)
 
-		resp, err := utils.SafeGet(data.Url)
+		fileData, err := utils.DownloadMedia(context.Background(), data.Url)
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
-
-		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Download concluído em %v. Lendo dados...", instance.Id, time.Since(startTime))
-
-		downloadStart := time.Now()
-		fileData, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Leitura dos dados concluída em %v. Tamanho: %d bytes", instance.Id, time.Since(downloadStart), len(fileData))
+		s.loggerWrapper.GetLogger(instance.Id).LogInfo("[%s] Download concluído em %v. Tamanho: %d bytes", instance.Id, time.Since(startTime), len(fileData))
 
 		mime, _ := mimetype.DetectReader(bytes.NewReader(fileData))
 		mimeType := mime.String()
@@ -1573,35 +1564,19 @@ func isAnimatedWebP(data []byte) bool {
 
 const stickerDownloadMaxBytes = 16 << 20 // 16 MiB
 
-var stickerHTTPClient = &http.Client{Timeout: 30 * time.Second}
+const stickerDownloadTimeout = 30 * time.Second
 
+// fetchStickerData baixa pelo utils.SafeHTTPClient: a URL vem de quem chama a
+// API, então endereço interno é recusado na conexão (SSRF).
 func fetchStickerData(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, fmt.Errorf("invalid sticker URL")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create sticker request: %w", err)
-	}
-	resp, err := stickerHTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch sticker from URL: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("failed to fetch sticker from URL: HTTP %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, stickerDownloadMaxBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read sticker data: %w", err)
-	}
-	if len(data) > stickerDownloadMaxBytes {
-		return nil, fmt.Errorf("sticker exceeds %d byte download limit", stickerDownloadMaxBytes)
-	}
-	return data, nil
+	ctx, cancel := context.WithTimeout(ctx, stickerDownloadTimeout)
+	defer cancel()
+	return utils.DownloadLimited(ctx, parsed.String(), stickerDownloadMaxBytes)
 }
 
 func (s *sendService) SendSticker(data *StickerStruct, instance *instance_model.Instance) (*MessageSendStruct, error) {
@@ -3127,24 +3102,8 @@ func (s *sendService) SendStatusMediaUrl(data *StatusMediaStruct, instance *inst
 		return nil, errors.New("type must be 'image' or 'video'")
 	}
 
-	req, err := http.NewRequest("GET", data.Url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Evolution-GO/1.0")
-
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download file from URL: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("failed to download file: HTTP status %d", resp.StatusCode)
-	}
-
-	fileData, err := io.ReadAll(resp.Body)
+	// URL de quem chama a API → mesmo download seguro do /send/media (SSRF).
+	fileData, err := utils.DownloadMedia(context.Background(), data.Url)
 	if err != nil {
 		return nil, err
 	}

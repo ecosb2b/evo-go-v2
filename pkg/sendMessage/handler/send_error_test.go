@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/evolution-foundation/evolution-go/pkg/utils"
 	whatsmeow_service "github.com/evolution-foundation/evolution-go/pkg/whatsmeow/service"
 )
 
@@ -23,6 +24,10 @@ func TestWriteSendError(t *testing.T) {
 		{"not connected", whatsmeow_service.ErrInstanceNotConnected, http.StatusConflict},
 		{"wrapped not connected", fmt.Errorf("send: %w", whatsmeow_service.ErrInstanceNotConnected), http.StatusConflict},
 		{"other failure", errors.New("upload failed"), http.StatusInternalServerError},
+		{"private address", fmt.Errorf("media download failed: %w", utils.ErrPrivateAddress), http.StatusUnprocessableEntity},
+		{"too many redirects", fmt.Errorf("media download failed: %w", utils.ErrTooManyRedirects), http.StatusUnprocessableEntity},
+		{"media too large", fmt.Errorf("media download failed: %w", utils.ErrMediaTooLarge), http.StatusUnprocessableEntity},
+		{"download HTTP status", errors.New("media download failed: HTTP status 404"), http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {
